@@ -1,8 +1,15 @@
-function solve(qpn::QPNet, x_init; level=1, max_iters = 100, tol=1e-4, debug=false, gen_Sol=false)
+function solve(qpn::QPNet, x_init; 
+        level=1,
+        max_iters = 100,
+        tol=1e-4,
+        debug=false,
+        high_dim=false,
+        gen_Sol=false)
+
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init; debug=debug)
+        (; x_opt, Sol) = solve_qep(qep, x_init; debug=debug, high_dim)
         fin = time()
         debug && println("Level ", level, " took ", fin-start, " seconds.")
         debug && display_debug(level, 1, x_opt, nothing, nothing)
@@ -12,9 +19,10 @@ function solve(qpn::QPNet, x_init; level=1, max_iters = 100, tol=1e-4, debug=fal
         fair_objective = fair_obj(qpn, level) 
         qep = gather(qpn, level)
         level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ keys(qp.S)] for id in keys(qep.sets))...)
-        ℐ = sub_indices(qpn, level)
+        sub_inds = sub_indices(qpn, level)
+
         for iters in 1:max_iters
-            (x_low, Sol_low) = solve(qpn, x; level=level+1, debug, gen_Sol=true)
+            (x_low, Sol_low) = solve(qpn, x; level=level+1, debug, gen_Sol=true, high_dim)
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
@@ -35,7 +43,7 @@ function solve(qpn::QPNet, x_init; level=1, max_iters = 100, tol=1e-4, debug=fal
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
                 debug && level == 1 && @infiltrate
-                res = solve_qep(qep, x, S_keep, ℐ)
+                res = solve_qep(qep, x, S_keep, sub_inds; high_dim)
                 debug && level == 1 && @infiltrate
                 set_guide!(res.Sol, z->(z-x)'*(z-x))
                 new_fair_value = fair_objective(res.x_opt)
@@ -62,7 +70,7 @@ function solve(qpn::QPNet, x_init; level=1, max_iters = 100, tol=1e-4, debug=fal
             end
 
             if !current_infeasible && !low_feasible
-                res = solve_qep(qep, x, S_keep, ℐ)
+                res = solve_qep(qep, x, S_keep, sub_inds)
                 x .= res.x_opt
                 all_same = false
             end

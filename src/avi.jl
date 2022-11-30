@@ -60,7 +60,7 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep, x; debug=false) 
+function solve_qep(qep, x; debug=false, high_dim=false) 
     st = time() 
     decision_inds = reduce(vcat, (qp.indices for qp in values(qep.qps))) |> sort
     total_dual_dim = sum(length(S) for S in values(qep.sets); init=0)
@@ -136,7 +136,7 @@ function solve_qep(qep, x; debug=false)
     (; x_opt, Sol)
 end
 
-function solve_qep(qep, x, S, sub_inds; debug=false)
+function solve_qep(qep, x, S, sub_inds; debug=false, high_dim=false)
     # TODO why not just preemptively add all subpiece sets to the dictionary,
     # and only modify the qp constraint dependencies? This requires a ton of
     # extra copying of huge matrices for large problems. Too lazy to fix now.
@@ -149,5 +149,5 @@ function solve_qep(qep, x, S, sub_inds; debug=false)
     qp_fair = QP(fair_obj(qep), Dict(id=>sum(qp.S[id] for qp in values(qep_augmented.qps) if id ∈ keys(qp.S); init=0.0) for id in keys(qep_augmented.sets)), sub_inds)
     filter!(p->!iszero(p.second), qp_fair.S)
     qep_augmented.qps[-1] = qp_fair
-    solve_qep(qep_augmented, x; debug)
+    solve_qep(qep_augmented, x; debug, high_dim)
 end
