@@ -65,23 +65,25 @@ end
 To be used for hashing purposes -- proper defn of Polyhedral regions
 """
 function Base.isequal(s1::Slice, s2::Slice) 
-    tol = 1e-6
     (round.(s1.a; digits=5)==round.(s2.a; digits=5)) &&
         (round(s1.l; digits=5)==round(s2.l; digits=5)) &&
         (round(s1.u; digits=5) == round(s2.u; digits=5)) &&
         s1.rl==s2.rl && s1.ru == s2.ru
-    #≈(s1.a, s2.a; atol=tol) && ≈(s1.l, s2.l; atol=tol) && ≈(s1.u, s2.u) && s1.rl == s2.rl && s1.ru == s2.ru
 end
 function Base.hash(s::Slice, h::UInt)
     hash((round.(s.a; digits=5), round(s.l; digits=5), round(s.u; digits=5), s.rl, s.ru), h)
-    #hash((s.a, s.l, s.u, s.rl, s.ru), h)
 end
 
 """
 A not-necessarily closed polyhedron. 
-Implemented as an intersection (collection)
+Implemented as one or more intersection (collection)
 of Slices.
+
+Poly = {x : ∃ yᵢ, l ≤ a'x + b'yᵢ ≤ u for all slices, for all i ∈ secondary}
 """
+#struct Poly
+#    main::Set{Slice}
+#end
 Poly = Set{Slice}
 
 """
@@ -92,19 +94,21 @@ function Set{Slice}(A,l,u)
     Poly(Slice(A[i,:], l[i], u[i]) for i in 1:length(l)) 
 end
 function Set{Slice}(A,l,u,rl,ru)
+    @assert length(l) == length(u) == size(A,1) == length(rl) == length(ru)
     Poly(Slice(A[i,:], l[i], u[i],rl[i], ru[i]) for i in 1:length(l)) 
 end
 
 """
-Returns Matrix-vector Polyhedral form as vector
+Returns Matrix-vector Polyhedron form as vector
 [A, l, u, rl, ru]
 """
 function vectorize(p::Poly)
+    # Warning: make sure that iterating over p gives same order each time
     A = reduce(vcat, (s.a' for s in p))
-    l = reduce(vcat, (s.l for s in p))
-    u = reduce(vcat, (s.u for s in p))
-    rl = reduce(vcat, (s.rl for s in p))
-    ru = reduce(vcat, (s.ru for s in p))
+    l = reduce(vcat, ([s.l,] for s in p))
+    u = reduce(vcat, ([s.u,] for s in p))
+    rl = reduce(vcat, ([s.rl,] for s in p))
+    ru = reduce(vcat, ([s.ru,] for s in p))
     (A,l,u,rl,ru)
 end
 
@@ -294,7 +298,6 @@ function Base.isempty(poly::Poly; tol=1e-4, debug=false)
     (; open_low, open_hi) = open_bounds(l,u,rl,ru)
     l = [l; fill(-Inf, n); 0]
     u = [fill(Inf, n); u; 1]
-    
     AA[1:n,end] = -1.0 * open_low
     AA[n+1:2n, end] = 1.0 * open_hi
     AA[end,end] = 1.0 
@@ -393,10 +396,37 @@ function intrinsic_dim(p::Poly; tol=1e-4, debug=false)
 end
 
 """
-Return true if x is an element of p.
+Return true if x is an element of p. Assumes closed poly.
 """
-function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6)
-    return all( x in S for S in p )
+function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6, debug=false)
+    d = embedded_dim(p)
+    n = length(x)
+    @infiltrate debug
+    if n == d
+        return all( x in S for S in p )
+    else
+        (A,l,u,rl,ru) = vectorize(p)
+        inds = collect(1:n)
+        uninds = collect(n+1:d)
+        Ap = A[:, inds]
+        Ax = A[:,uninds]
+        lx = length(uninds)
+        m = OSQP.Model()
+        OSQP.setup!(m; 
+                    P=sparse(I,lx,lx), 
+                    q = zeros(lx), 
+                    A=sparse(Ax), 
+                    l=l-Ap*x[inds], 
+                    u=u-Ap*x[inds], 
+                    polish=true, 
+                    eps_abs=1e-8, 
+                    eps_rel=1e-8, 
+                    verbose=false)
+        res = OSQP.solve!(m)
+        sv = abs(res.info.status_val)
+        @infiltrate (sv != 3 && sv != 1)
+        return abs(res.info.status_val) != 3
+    end
 end
 function Base.in(x::Vector{Float64}, s::Slice; tol=1e-6)
     ax = s.a'*x

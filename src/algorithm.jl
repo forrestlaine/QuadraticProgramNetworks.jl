@@ -1,15 +1,17 @@
 function solve(qpn::QPNet, x_init; 
         level=1,
-        max_iters = 100,
+        max_iters = 150,
         tol=1e-4,
         debug=false,
+        rng=MersenneTwister(),
         high_dim=false,
+        high_dim_top_iters=10,
         gen_Sol=false)
 
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init; debug=debug, high_dim)
+        (; x_opt, Sol) = solve_qep(qep, x_init; debug, high_dim, rng)
         fin = time()
         debug && println("Level ", level, " took ", fin-start, " seconds.")
         debug && display_debug(level, 1, x_opt, nothing, nothing)
@@ -22,11 +24,11 @@ function solve(qpn::QPNet, x_init;
         sub_inds = sub_indices(qpn, level)
 
         for iters in 1:max_iters
-            (x_low, Sol_low) = solve(qpn, x; level=level+1, debug, gen_Sol=true, high_dim)
+            (x_low, Sol_low) = solve(qpn, x; level=level+1, debug,  high_dim, gen_Sol=true, rng)
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
-            local_Sols = Vector{LocalAVISolutions}()
+            local_Sols = [] #Vector{LocalAVISolutions}()
             local_regions = Vector{Poly}()
             all_same = true
             low_feasible = false
@@ -42,15 +44,15 @@ function solve(qpn::QPNet, x_init;
                 sub_count += 1
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
-                debug && level == 1 && @infiltrate
                 res = solve_qep(qep, x, S_keep, sub_inds; high_dim)
-                debug && level == 1 && @infiltrate
                 set_guide!(res.Sol, z->(z-x)'*(z-x))
-                new_fair_value = fair_objective(res.x_opt)
+                new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                 better_value_found = new_fair_value < current_fair_value - tol
                 same_value_found = new_fair_value < current_fair_value + tol
                 current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
                 if current_infeasible || better_value_found
+                    diff = norm(x-res.x_opt)
+                    debug && println("Diff :", diff)
                     x .= res.x_opt
                     all_same = false #TODO should queue all non-solutions?
                     break
@@ -70,15 +72,26 @@ function solve(qpn::QPNet, x_init;
             end
 
             if !current_infeasible && !low_feasible
-                res = solve_qep(qep, x, S_keep, sub_inds)
+                res = solve_qep(qep, x, S_keep, sub_inds; high_dim)
+                diff = norm(x-res.x_opt)
+                debug && println("Diff :", diff)
                 x .= res.x_opt
                 all_same = false
             end
             fin = time()
             debug && println("Level ", level, " took ", fin-start, " seconds.") 
-
             debug && display_debug(level, iters, x, sub_count, throw_count)
-            !all_same && continue
+
+            if high_dim 
+                if level == 1 && iters < high_dim_top_iters
+                    continue
+                end
+            else
+                if !all_same
+                    continue
+                end
+            end
+
             level_dim = length(param_indices(qpn, level))
             S = gen_Sol ? combine(local_regions, local_Sols, level_dim; show_progress=false) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
@@ -102,8 +115,8 @@ function combine(regions, solutions, level_dim; show_progress=false)
         root = IntersectionRoot(combined, [0,0], level_dim)
         #return distinct(Iterators.filter(x->intrinsic_dim(x) ≥ level_dim, Iterators.flatten(solutions)))
     else
-        #complements = map(complement, regions)
-        complements = [PolyUnion([Poly(),]) for _ in regions]
+        complements = map(complement, regions)
+        #complements = [PolyUnion([Poly(),]) for _ in regions]
         combined = [[collect(s); rc] for (rc, s) in zip(complements, solutions)]
         root = IntersectionRoot(combined, length.(complements), level_dim; show_progress)
     end

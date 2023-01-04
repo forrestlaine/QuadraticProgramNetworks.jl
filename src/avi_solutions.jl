@@ -31,6 +31,32 @@ function Base.hash(v::Vertex, h::UInt)
     hash(round.(v.v; digits=v.digits))
 end
 
+function permute!(P, var_inds, param_inds)
+    d = embedded_dim(P)
+    dv = length(var_inds)
+    dp = length(param_inds)
+    for slice in P
+        a = similar(slice.a)
+        a[var_inds] = slice.a[1:dv]
+        a[param_inds] = slice.a[d-dp+1:d]
+        a[dv+dp+1:end] = slice.a[dv+1:d-dp]
+        slice.a .= a
+        dropzeros!(slice.a)
+    end
+end
+
+function project_and_permute(S, var_inds, param_inds)
+    d = embedded_dim(S)
+    dv = length(var_inds)
+    dp = length(param_inds)
+    projection_inds = [collect(1:dv); collect(d-dp+1:d)]
+    
+    piece = project(S, projection_inds)
+    permute!(piece, var_inds, param_inds) 
+
+    return simplify(piece)
+end
+
 mutable struct LocalAVISolutions
     avi::AVI
     z::Vector{Float64}
@@ -43,7 +69,7 @@ mutable struct LocalAVISolutions
     polys::PriorityQueue{PolyExemplar, Float64}
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
-    LocalAVISolutions(avi::AVI,z::Vector{Float64}, w::Vector{Float64}, decision_inds::Vector{Int}, param_inds::Vector{Int}) = begin
+    LocalAVISolutions(avi::AVI, z::Vector{Float64}, w::Vector{Float64}, decision_inds::Vector{Int}, param_inds::Vector{Int}) = begin
         n = length(z)
         m = length(w)
         J = comp_indices(avi,z,w)
@@ -72,6 +98,61 @@ mutable struct LocalAVISolutions
         new(avi, z, w, guide, vertex_queue, queued_Ks, explored_vertices, explored_Ks, polys, decision_inds, param_inds)
     end
 end
+    
+function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0)
+    n = length(z)
+    dx = length(decision_inds) + length(param_inds)
+    m = length(w)
+
+    local piece
+    local x
+    
+    for round in 1:extra_rounds
+        q = randn(rng, n)
+        J = comp_indices(avi,z,w)
+        K = random_K(J, rng)
+        piece = local_piece(avi,n,m,K)
+        (A,l,u,rl,ru) = vectorize(piece)
+        Aw = A[:,n+1:end]*w
+        mod = OSQP.Model()
+        OSQP.setup!(mod; 
+                    q,
+                    A=[A[:,1:n]; q'], 
+                    l = [l-Aw; -10.0], 
+                    u = [u-Aw; 10.0],
+                    verbose = false,
+                    eps_abs=1e-8,
+                    eps_rel=1e-8,
+                    polish=true)
+        res = OSQP.solve!(mod)
+        if res.info.status_val == 1
+            z = res.x
+        end
+    end
+
+    J = comp_indices(avi,z,w)
+    K = random_K(J, rng)
+    piece = local_piece(avi,n,m,K)
+    permute!(piece, decision_inds, param_inds)
+
+    x = zeros(dx)
+    x[decision_inds] = z[1:length(decision_inds)]
+    x[param_inds] = w
+
+    (; piece, x_opt=x)
+end
+
+function random_K(J, rng)
+    n2 = length(J[2])
+    n4 = length(J[4])
+    i2 = rand(rng, Bool, n2)
+    i4 = rand(rng, Bool, n4)
+    K1 = Set([J[1]; [j for (i, j) in zip(i2, J[2]) if i]])
+    K2 = Set([J[3]; [j for (i, j) in zip(i2, J[2]) if !i]; [j for (i, j) in zip(i4, J[4]) if !i]])
+    K3 = Set([J[5]; [j for (i, j) in zip(i4, J[4]) if i]])
+    K4 = Set(J[6])
+    Dict(1=>K1, 2=>K2, 3=>K3, 4=>K4)
+end
 
 function set_guide!(avi_sols::LocalAVISolutions, guide)
     avi_sols.guide = guide
@@ -85,8 +166,10 @@ function set_guide!(avi_sols::LocalAVISolutions, guide)
         avi_sols.Ks[K] = permute_eval(guide, K.ex, avi_sols.decision_inds, avi_sols.param_inds)
     end
 end
+function set_guide!(::Vector{Poly}, guide)
+end
 
-function expand(avi,z,w,K,decision_inds,param_inds)
+function expand(avi,z,w,K,decision_inds,param_inds; high_dim=false)
     n = length(z)
     m = length(w)
     piece = local_piece(avi,n,m,K)
@@ -188,8 +271,6 @@ K[1] : Mz+Nw+o ≥ 0, z = l
 K[2] : Mz+Nw+o = 0, l ≤ z ≤ u
 K[3] : Mz+Nw+o ≤ 0, z = u
 K[4] : Mz+Nw+o free, l = z = u
-
-# TODO probably inefficient initialization with Poly
 """
 function local_piece(avi, n, m, K)
     A = [avi.M avi.N;
@@ -208,6 +289,8 @@ function local_piece(avi, n, m, K)
     end
     l = [bounds[:,1]; bounds[:,3]]
     u = [bounds[:,2]; bounds[:,4]]
+    inds = l.>u
+    l[inds] = u[inds]
     meaningful = find_non_trivial(A,l,u)
     Poly(A[meaningful,:], l[meaningful], u[meaningful])
 end
@@ -232,6 +315,6 @@ function comp_indices(avi, z, w; tol=1e-4)
     J[4] = findall( isapprox.(z, avi.u; atol=tol) .&& riszero .&& .!equal_bounds)
     J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol )
     J[6] = findall( equal_bounds .&& riszero )
-    @assert sum(length.(values(J))) == length(z)
+    @infiltrate sum(length.(values(J))) != length(z)
     return J
 end

@@ -34,7 +34,7 @@
            st ∑ᵢ yi >= 1 
     """
     num_vars = 4 + 2 + 6
-    sets = Dict{Int, Poly2}()
+    sets = Dict{Int, Poly}()
     qps = Dict{Int, QP}()
     Q = sparse([1 0 -1 0.0;
                 0 1 0 -1;
@@ -48,7 +48,7 @@
     qp_id = 1
     a = spzeros(1, num_vars)
     a[1,5:12] .= 1.0
-    S = Poly2(a, [0.25,], [Inf,])
+    S = Poly(a, [0.25,], [Inf,])
     sets[set_id] = S
     set_id += 1
 
@@ -74,7 +74,7 @@
             a[2,ind] = 1.0
             a[2,16+j] = -1.0
             a[2,16+j+1] = 1.0
-            S = Poly2(a, [-Inf, -Inf], [0, 0.0])
+            S = Poly(a, [-Inf, -Inf], [0, 0.0])
             sets[set_id] = S
             qp = QP(Quadratic(Q,q), Dict(set_id=>1.0), [ind,])
             qps[qp_id] = qp
@@ -93,7 +93,7 @@
             q[ind] = 1.0*i
             a = spzeros(1, num_vars)
             a[ind] = 1.0
-            S = Poly2(a, [0.0,], [1.0,])
+            S = Poly(a, [0.0,], [1.0,])
             sets[set_id] = S
             qp = QP(Quadratic(Q,q), Dict(set_id=>1.0), [ind,])
             qps[qp_id] = qp
@@ -107,6 +107,6 @@
     x = zeros(num_vars)
     x[1:2] = [2.5,2.6]
     x[3:4] = [2.1, 0.2]
-    x, Sol = solve(qep, x; debug=true)
+    x, Sol = solve(qep, x; debug=true, high_dim=true)
     display(x[3:4])
 end
