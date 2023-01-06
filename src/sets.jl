@@ -222,7 +222,7 @@ function get_Polyhedron(p::Poly; tol=1e-6)
         end
         reduce(∩, cons)
     end
-    Polyhedra.polyhedron(hrep_poly)
+    #Polyhedra.polyhedron(hrep_poly)
 end
 
 """
@@ -231,8 +231,8 @@ Get vertices of poly.
 This is probably not efficient for most polys of large size and low implicit dimension.
 """
 function get_verts(p; tol=1e-6)
-    poly = get_Polyhedron(p; tol)
-    vrep = Polyhedra.doubledescription(poly.hrep)
+    hrep = get_Polyhedron(p; tol)
+    vrep = Polyhedra.doubledescription(hrep)
     if length(vrep.points.points) == 0
         @infiltrate
     end
@@ -244,7 +244,9 @@ end
 Project the poly into lower embedded dimension.
 """
 function project(p::P, keep_dims; tol=1e-6) where P<:Union{Poly, Poly}
-    poly = get_Polyhedron(simplify(p); tol)
+    hrep = get_Polyhedron(simplify(p); tol)
+    vrep = Polyhedra.doubledescription(hrep)
+    poly = Polyhedra.polyhedron(vrep)
     projected = Polyhedra.project(poly, keep_dims)
     local hrep
     try

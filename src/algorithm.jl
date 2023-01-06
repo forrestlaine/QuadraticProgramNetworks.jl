@@ -37,8 +37,9 @@ function solve(qpn::QPNet, x_init;
             sub_count = 0
             throw_count = 0
             if debug && level+1 < num_levels(qpn)
-                println("About to reason about potentially ", potential_length(Sol_low), " pieces (depth of ", depth(Sol_low), ").")
-            end
+                println("About to reason about potentially ", 
+                        potential_length(Sol_low), " pieces (depth of ", depth(Sol_low), ").")
+            end    
             local S_keep
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1

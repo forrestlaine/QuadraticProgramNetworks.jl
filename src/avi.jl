@@ -74,17 +74,6 @@ function solve_qep(qep, x; debug=false, high_dim=false, rng=MersenneTwister(1))
         end
         A[:,decision_inds], A2, Ax, A[:, param_inds], l, u 
     end |> (x->vcat.(x...))
-
-    #M11 = Qs
-    #M12 = spzeros(length(decision_inds), total_dual_dim)
-    #M13 = -A2s'
-    #M22 = spzeros(total_dual_dim, total_dual_dim)
-    #M23 = I(total_dual_dim)
-    #M31 = As
-
-    #M = [M11 M12 M13;
-    #     M12' M22 M23;
-    #     M31 -M23' M22]
     
     M11 = Qs
     M12 = spzeros(length(decision_inds), total_aux_dim)
@@ -107,12 +96,6 @@ function solve_qep(qep, x; debug=false, high_dim=false, rng=MersenneTwister(1))
          M31 M32 M33 M34;
          M41 M42 M43 M44]
 
-    #N1 = Rs
-    #N2 = spzeros(total_dual_dim, length(param_inds))
-    #N3 = Bs
-
-    #N = [N1; N2; N3]
-    
     N1 = Rs
     N2 = spzeros(total_aux_dim, length(param_inds))
     N3 = spzeros(total_dual_dim, length(param_inds))
@@ -125,9 +108,9 @@ function solve_qep(qep, x; debug=false, high_dim=false, rng=MersenneTwister(1))
     u = [fill(Inf, length(decision_inds)+total_aux_dim); us; fill(Inf, total_dual_dim)]
 
     w = x[param_inds]
-    z0 = [x[decision_inds]; zeros(total_aux_dim+total_dual_dim); M31*x[decision_inds]+N3*w]
+    z0 = [x[decision_inds]; zeros(total_aux_dim+total_dual_dim); M41*x[decision_inds]+N4*w]
     avi = AVI(M, N, o, l, u)
-    
+
     (; z, status) = solve_avi(avi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI Solve error!")

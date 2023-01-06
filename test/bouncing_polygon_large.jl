@@ -148,11 +148,14 @@ end
             a_priv[s,offset+num_faces+(s-1)*2+1] = a_priv[s,offset+surf_off+1] = surface_normals[s][1]
             a_priv[s,offset+num_faces+(s-1)*2+2] = a_priv[s,offset+surf_off+2] = surface_normals[s][2]
         end
+        # vars: [ p0 v0 bd0 | λ1 r1 p1 v1 bd1 | λ2 r2 p2 v2 bd2 | ... ]
 
         S_priv = QPN.Poly(a_priv, surface_nominals, fill(Inf, num_surfaces))
         vars_for_surface = collect(offset+1:offset+num_faces)
+        #vars_for_surface = [collect(offset+1:offset+num_faces); collect(offset+surf_off+1:offset+surf_off+4+num_faces*2)]
         sets[set_ind] = S_priv
         qp = QP(f, Dict(set_ind=>1.0), vars_for_surface)
+        #qp = QP(f, Dict(set_ind=>1.0, set_ind-1=>1.0), vars_for_surface)
         qps[qp_ind] = qp
         push!(level_1_progs, qp_ind)
         set_ind += 1

@@ -22,17 +22,17 @@ end
     ###################################
     
     # Parameters
-    T = 4   # number of simulation steps
+    T = 15   # number of simulation steps
     Δ = 0.1  # simulation timestep
     p0 = [0.0; 3.5] # initial configuration
-    v0 = [0.0; -1.5]  # initial velocity
+    v0 = [0; -1.5]  # initial velocity
     g = [0.0, 0.0]  # gravity vector
-    Kₚ = 50.0 
+    Kₚ = 100.0 
     Kᵥ = 1.0
     M = 5.0 # centroid mass
     m = 0.5 # face mass
 
-    num_faces =5 
+    num_faces = 4
     d = [[cos(θ), sin(θ)] for θ in collect(1:num_faces)*(2*pi)/num_faces]
     b̄ = 2.0*ones(Float64, num_faces)
     surface_normals = [[1.0, 3.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -3.0]]
@@ -48,6 +48,7 @@ end
     sets =  Dict{Int, QPN.Poly}()
     level_1_progs = Set{Int}()
     level_2_progs = Set{Int}()
+    dyn_sets = []
     
     x0 = [p0; v0; reduce(vcat, ([p0 + b̄[f]*d[f]; v0] for f in 1:num_faces))]
     x = [x0; reduce(vcat, ([zeros(num_faces); x0] for _ in 1:T))]
@@ -116,14 +117,15 @@ end
         
         S_dyn = QPN.Poly(A, l, u)
         sets[set_ind] = S_dyn
-        Q = spzeros(total_dim, total_dim)
-        q = zeros(total_dim)
-        f = Quadratic(Q,q)
-        qp = QP(f, Dict(set_ind=>1.0), collect(offset+1:offset+4*(num_faces+1)))
-        qps[qp_ind] = qp
-        push!(level_1_progs, qp_ind)
+        push!(dyn_sets, set_ind)
+        #Q = spzeros(total_dim, total_dim)
+        #q = zeros(total_dim)
+        #f = Quadratic(Q,q)
+        #qp = QP(f, Dict(set_ind=>1.0), collect(offset+1:offset+4*(num_faces+1)))
+        #qps[qp_ind] = qp
+        #push!(level_2_progs, qp_ind)
         set_ind += 1
-        qp_ind += 1
+        #qp_ind += 1
 
         #for f in 1:num_faces
         Q = spzeros(total_dim, total_dim)
@@ -140,9 +142,10 @@ end
         end
 
         S_priv = QPN.Poly(A_priv, l, fill(Inf, num_surfaces*num_faces))
-        vars_for_surface = collect(offset-num_faces+1:offset)
+        #vars_for_surface = collect(offset-num_faces+1:offset)
+        vars_for_surface = [collect(offset-num_faces+1:offset); collect(offset+1:offset+4*(num_faces+1))]
         sets[set_ind] = S_priv
-        qp = QP(f, Dict(set_ind=>1.0), vars_for_surface)
+        qp = QP(f, Dict(set_ind=>1.0, set_ind-1=>1.0), vars_for_surface)
         qps[qp_ind] = qp
         push!(level_1_progs, qp_ind)
         set_ind += 1
@@ -154,7 +157,7 @@ end
     qp_net = QPNet(qps, sets, net)
     @infiltrate
 
-    x, Sol = solve(qp_net, x; debug=true, gen_Sol=false, high_dim=false)
+    x, Sol = solve(qp_net, x; debug=true, gen_Sol=false, high_dim=true)
    
     # setup visualization
     f = Figure()
