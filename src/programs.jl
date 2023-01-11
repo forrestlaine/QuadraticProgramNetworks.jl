@@ -24,10 +24,21 @@ struct QEP
     sets::Dict{ConID, Poly}
 end
 
+@enum SharedVariableMode begin
+    MIN_NORM = 1
+    SHARED_DUAL = 2
+end
+
+Base.@kwdef struct QPNetOptions
+    shared_variable_mode::SharedVariableMode=SHARED_DUAL
+    high_dimension::Bool=false
+end
+
 struct QPNet
     qps::Dict{Int, QP}
     sets::Dict{ConID, Poly}
     network::Vector{Set{Int}}
+    options::QPNetOptions
 end
 
 function num_levels(qpn::QPNet)

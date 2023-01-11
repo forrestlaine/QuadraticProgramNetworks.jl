@@ -46,8 +46,6 @@ end
 Solve the Quadratic Equilibrium Problem.
 """
 function solve_qep(qep, x; debug=false, high_dim=false, rng=MersenneTwister(1)) 
-    # TODO : if high dim, some sets in qep will have different embedded dim.
-    # Need to redefine AVI.
     x_dim = length(x)
     decision_inds = reduce(vcat, (qp.indices for qp in values(qep.qps))) |> sort
     total_dual_dim = sum(length(S) for S in values(qep.sets); init=0)
