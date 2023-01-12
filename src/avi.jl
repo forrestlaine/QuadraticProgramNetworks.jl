@@ -45,9 +45,17 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep, x; debug=false, high_dim=false, rng=MersenneTwister(1)) 
+function solve_qep(qep, x; debug=false, high_dimension=false, shared_var_mode=SHARED_DUAL, rng=MersenneTwister(1)) 
     x_dim = length(x)
-    decision_inds = reduce(vcat, (qp.indices for qp in values(qep.qps))) |> sort
+
+    private_decision_inds = reduce(vcat, (qp.indices for (id, qp) in qep.qps if id > 0)) |> sort
+    shared_decision_inds = (-1 in keys(qep.qps)) ? qep.qps[-1].indices : Vector{Int}()
+    decision_inds = [private_decision_inds; shared_decision_inds]
+
+    # Debug code
+    decision_inds_old = reduce(vcat, (qp.indices for qp in values(qep.qps))) |> sort
+    @assert Set(decision_inds) == Set(decision_inds_old)
+
     total_dual_dim = sum(length(S) for S in values(qep.sets); init=0)
     param_inds = setdiff(Set(1:x_dim), Set(decision_inds)) |> collect |> sort
 
@@ -112,7 +120,7 @@ function solve_qep(qep, x; debug=false, high_dim=false, rng=MersenneTwister(1))
     (; z, status) = solve_avi(avi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI Solve error!")
-    if high_dim
+    if high_dimension
         (; piece, x_opt) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)
         (; x_opt, Sol=[piece,])
     else 
@@ -123,7 +131,7 @@ function solve_qep(qep, x; debug=false, high_dim=false, rng=MersenneTwister(1))
     end
 end
 
-function solve_qep(qep, x, S, sub_inds; debug=false, high_dim=false, rng=MersenneTwister(1))
+function solve_qep(qep, x, S, sub_inds; debug=false, high_dimension=false, rng=MersenneTwister(1))
     # TODO why not just preemptively add all subpiece sets to the dictionary,
     # and only modify the qp constraint dependencies? This requires a ton of
     # extra copying of huge matrices for large problems. Too lazy to fix now.
@@ -134,5 +142,5 @@ function solve_qep(qep, x, S, sub_inds; debug=false, high_dim=false, rng=Mersenn
     qp_fair = QP(fair_obj(qep), Dict(id=>sum(qp.S[id] for qp in values(qep_augmented.qps) if id ∈ keys(qp.S); init=0.0) for id in keys(qep_augmented.sets)), sub_inds)
     filter!(p->!iszero(p.second), qp_fair.S)
     qep_augmented.qps[-1] = qp_fair
-    solve_qep(qep_augmented, x; debug, high_dim)
+    solve_qep(qep_augmented, x; debug, high_dimension)
 end

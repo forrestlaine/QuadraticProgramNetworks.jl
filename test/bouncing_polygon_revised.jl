@@ -154,10 +154,11 @@ end
 
     #net = [level_1_progs, level_2_progs]
     net = [level_1_progs, ]
-    qp_net = QPNet(qps, sets, net)
+    options = QPN.QPNetOptions(; debug=true, high_dimension=true, gen_solution_map=false)
+    qp_net = QPNet(qps, sets, net, options)
     @infiltrate
 
-    x, Sol = solve(qp_net, x; debug=true, gen_Sol=false, high_dim=true)
+    x, Sol = solve(qp_net, x)
    
     # setup visualization
     f = Figure()

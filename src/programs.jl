@@ -11,17 +11,15 @@ function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
     Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs)) 
 end
 
-ConID = Int64
-
 struct QP
     f::Quadratic
-    S::Dict{ConID, Float64}
+    S::Dict{Int, Float64}
     indices::Vector{Int}
 end
 
 struct QEP
     qps::Dict{Int, QP}
-    sets::Dict{ConID, Poly}
+    sets::Dict{Int, Poly}
 end
 
 @enum SharedVariableMode begin
@@ -31,14 +29,22 @@ end
 
 Base.@kwdef struct QPNetOptions
     shared_variable_mode::SharedVariableMode=SHARED_DUAL
-    high_dimension::Bool=false
+    max_iters::Int=150
+    tol::Float64=1e-4
+    high_dimension::Bool=true
+    high_dimension_max_iters::Int=10
+    debug::Bool=false
+    gen_solution_map::Bool=false
 end
 
 struct QPNet
     qps::Dict{Int, QP}
-    sets::Dict{ConID, Poly}
+    sets::Dict{Int, Poly}
     network::Vector{Set{Int}}
     options::QPNetOptions
+    #QPNet(qps, sets, network) = begin
+    #    new(qps, sets, network, QPNetOptions())
+    #end
 end
 
 function num_levels(qpn::QPNet)
@@ -47,7 +53,7 @@ end
 
 function gather(qpn::QPNet, level)
     qps = Dict(i=>qpn.qps[i] for i in qpn.network[level])
-    sets = Dict{ConID, Poly}(id=>qpn.sets[id] for qp in values(qps) for id in keys(qp.S))
+    sets = Dict{Int, Poly}(id=>qpn.sets[id] for qp in values(qps) for id in keys(qp.S))
     QEP(qps, sets)
 end
 
