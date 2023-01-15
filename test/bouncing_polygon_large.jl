@@ -64,7 +64,7 @@ end
     total_dim = 4 + num_faces*2 + T*sim_state_dim # add initial values into state for convenience
 
     qps = Dict{Int, QP}()
-    sets =  Dict{Int, QPN.Poly}()
+    constraints =  Dict{Int, QPN.Constraint}()
     level_1_progs = Set{Int}()
     level_2_progs = Set{Int}()
     
@@ -128,11 +128,12 @@ end
             #d - d̄ - Δ * (-Kp (b-nom) - Kv (d) + λ'*n) / m  = Δ
         end
         S_dyn = QPN.Poly(a, l, u)
-        sets[set_ind] = S_dyn
+        C = QPN.Constraint(S_dyn, Dict(qp_ind=>1))
+        constraints[set_ind] = C
         Q = spzeros(total_dim, total_dim)
         q = zeros(total_dim)
         f = Quadratic(Q,q)
-        qp = QP(f, Dict(set_ind=>1.0), collect(offset+surf_off+1:offset+surf_off+4+num_faces*2)) # p, v, bd. No objective just satisfy dynamics
+        qp = QP(f, [set_ind,], collect(offset+surf_off+1:offset+surf_off+4+num_faces*2)) # p, v, bd. No objective just satisfy dynamics
         qps[qp_ind] = qp
         push!(level_2_progs, qp_ind)
         set_ind += 1
@@ -151,10 +152,11 @@ end
         # vars: [ p0 v0 bd0 | λ1 r1 p1 v1 bd1 | λ2 r2 p2 v2 bd2 | ... ]
 
         S_priv = QPN.Poly(a_priv, surface_nominals, fill(Inf, num_surfaces))
+        C = QPN.Constraint(S_priv, Dict(qp_ind=>1))
         vars_for_surface = collect(offset+1:offset+num_faces)
         #vars_for_surface = [collect(offset+1:offset+num_faces); collect(offset+surf_off+1:offset+surf_off+4+num_faces*2)]
-        sets[set_ind] = S_priv
-        qp = QP(f, Dict(set_ind=>1.0), vars_for_surface)
+        constraints[set_ind] = C
+        qp = QP(f, [set_ind,], vars_for_surface)
         #qp = QP(f, Dict(set_ind=>1.0, set_ind-1=>1.0), vars_for_surface)
         qps[qp_ind] = qp
         push!(level_1_progs, qp_ind)
@@ -176,9 +178,10 @@ end
                 a_priv[f,offset+surf_off+4+(f-1)*2+1] = -1.0
             end
             S_priv = QPN.Poly(a_priv, l, u)
-            sets[set_ind] = S_priv
+            C = QPN.Constraint(S_priv, Dict(qp_ind=>1))
+            constraints[set_ind] = C
             vars_for_r = [offset+num_faces+(s-1)*2+1, offset+num_faces+(s-1)*2+2]
-            qp = QP(f, Dict(set_ind=>1.0), vars_for_r)
+            qp = QP(f, [set_ind,], vars_for_r)
             qps[qp_ind] = qp
             push!(level_2_progs, qp_ind)
             set_ind += 1
@@ -187,10 +190,11 @@ end
     end
 
     net = [level_1_progs, level_2_progs]
-    qp_net = QPNet(qps, sets, net)
+    options = QPN.QPNetOptions(; debug=true, high_dimension=true, gen_solution_map=false)
+    qp_net = QPNet(qps, constraints, net, options)
     
     x = [p0; v0; reduce(vcat, ([nom; 0] for nom in poly_nominals)); zeros(T*sim_state_dim)]
-    x, Sol = solve(qp_net, x; debug=true, gen_Sol=false, high_dim=true)
+    x, Sol = solve(qp_net, x)
    
     # setup visualization
     f = Figure()

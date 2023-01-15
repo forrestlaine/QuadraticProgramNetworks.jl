@@ -14,11 +14,11 @@ function solve(qpn::QPNet, x_init;
         x = copy(x_init)
         fair_objective = fair_obj(qpn, level) 
         qep = gather(qpn, level)
-        level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ keys(qp.S)] for id in keys(qep.sets))...)
+        level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ qp.constraint_indices] for id in keys(qep.constraints))...)
         sub_inds = sub_indices(qpn, level)
 
         for iters in 1:qpn.options.max_iters
-            (x_low, Sol_low) = solve(qpn, x; level=level+1, qpn.options.debug,  qpn.options.high_dimension, rng)
+            (x_low, Sol_low) = solve(qpn, x; level=level+1, rng)
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
@@ -27,7 +27,7 @@ function solve(qpn::QPNet, x_init;
             all_same = true
             low_feasible = false
             current_fair_value = fair_objective(x)
-            current_infeasible = !all( x ∈ qep.sets[i] for i in level_constraint_ids)
+            current_infeasible = !all( x ∈ qep.constraints[i].poly for i in level_constraint_ids)
             sub_count = 0
             throw_count = 0
             if debug && level+1 < num_levels(qpn)

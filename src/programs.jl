@@ -11,15 +11,28 @@ function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
     Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs)) 
 end
 
+# TODO rename S to constraint_indices and indices to decision_var_indices
 struct QP
     f::Quadratic
-    S::Dict{Int, Float64}
-    indices::Vector{Int}
+    constraint_indices::Vector{Int}
+    var_indices::Vector{Int}
+end
+
+"""
+poly = S
+group_mapping = {1 => 1, 2 => 1, 3 => 2}
+
+implies that players 1 & 2 share a multiplier for constraint S,
+and player 3 has their own multiplier. No other players are involved.
+"""
+struct Constraint
+    poly::Poly
+    group_mapping::Dict{Int, Int}
 end
 
 struct QEP
     qps::Dict{Int, QP}
-    sets::Dict{Int, Poly}
+    constraints::Dict{Int, Constraint}
 end
 
 @enum SharedVariableMode begin
@@ -39,12 +52,9 @@ end
 
 struct QPNet
     qps::Dict{Int, QP}
-    sets::Dict{Int, Poly}
+    constraints::Dict{Int, Constraint}
     network::Vector{Set{Int}}
     options::QPNetOptions
-    #QPNet(qps, sets, network) = begin
-    #    new(qps, sets, network, QPNetOptions())
-    #end
 end
 
 function num_levels(qpn::QPNet)
@@ -53,8 +63,8 @@ end
 
 function gather(qpn::QPNet, level)
     qps = Dict(i=>qpn.qps[i] for i in qpn.network[level])
-    sets = Dict{Int, Poly}(id=>qpn.sets[id] for qp in values(qps) for id in keys(qp.S))
-    QEP(qps, sets)
+    constraints = Dict{Int, Constraint}(id=>qpn.constraints[id] for qp in values(qps) for id in qp.constraint_indices)
+    QEP(qps, constraints)
 end
 
 function fair_obj(qep::QEP)
@@ -67,14 +77,14 @@ end
 
 function sub_indices(qpn::QPNet, level)
     L = length(qpn.network)
-    reduce(vcat, (qpn.qps[i].indices for l in level+1:L for i in qpn.network[l]))
+    reduce(vcat, (qpn.qps[i].var_indices for l in level+1:L for i in qpn.network[l]))
 end
 
 function subeq_indices(qpn::QPNet, level)
     L = length(qpn.network)
-    reduce(vcat, (qpn.qps[i].indices for l in level:L for i in qpn.network[l]))
+    reduce(vcat, (qpn.qps[i].var_indices for l in level:L for i in qpn.network[l]))
 end
 
 function param_indices(qpn::QPNet, level)
-    collect(setdiff(1:embedded_dim(first(qpn.sets).second), Set(subeq_indices(qpn, level))))
+    collect(setdiff(1:embedded_dim(first(qpn.constraints).second.poly), Set(subeq_indices(qpn, level))))
 end
