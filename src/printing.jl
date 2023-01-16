@@ -128,12 +128,12 @@ function Base.show(io::IO, mime::MIME"text/plain", qp::QP)
     ioc = IOContext(io, :indent=>indent+2)
     println(io, space*"function f:")
     show(ioc, mime, qp.f)
-    println(io, space*"Set S:")
-    show(ioc, mime, qp.S)
+    println(io, space*"Constraint indices:")
+    show(ioc, mime, qp.constraint_indices)
     println(io,"")
     println(io, space*"Decision variable index set ℐ:")
     print(io, space*"  {")
-    for i in qp.indices
+    for i in qp.var_indices
         print(io, i, ", ")
     end
     println(io, "}")

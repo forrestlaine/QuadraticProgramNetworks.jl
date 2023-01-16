@@ -140,8 +140,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); d
         [A1 Ax], A2, B1, l1, u1
     end |> (x->vcat.(x...))
 
-    @infiltrate # works to this point
-
     M11 = Qs
     M12 = Mψ
     M13 = spzeros(N_players*N_shared_vars+N_private_vars, standard_dual_dim)
@@ -204,7 +202,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); d
 
     w = x[param_inds]
     z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
-    @infiltrate
     avi = AVI(M, N, o, l, u)
 
     (; z, status) = solve_avi(avi, z0, w)
