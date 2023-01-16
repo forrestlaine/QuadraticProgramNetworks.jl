@@ -45,7 +45,7 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep_base, x, shared_decision_inds=Vector{Int}(), S=nothing; debug=false, high_dimension=false, shared_var_mode=SHARED_DUAL, rng=MersenneTwister(1)) 
+function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); debug=false, high_dimension=false, shared_var_mode=SHARED_DUAL, rng=MersenneTwister(1)) 
     x_dim = length(x)
     N_players = length(qep_base.qps)
 
@@ -56,36 +56,41 @@ function solve_qep(qep_base, x, shared_decision_inds=Vector{Int}(), S=nothing; d
     else
         qep = deepcopy(qep_base)
         foreach(qp->push!(qp.constraint_indices, -1), values(qep.qps))
-        qep.sets[-1] = Constraint(S, Dict(i=>1 for i in keys(qep.qps))) 
+        qep.constraints[-1] = Constraint(S, Dict(i=>1 for i in keys(qep.qps))) 
         aux_dim = embedded_dim(S) - x_dim
         @assert length(shared_decision_inds) > 0
     end
 
-    N_shared_vars = length(shared_decision_inds) + aux_dim
 
     private_decision_inds = reduce(vcat, (qp.var_indices for qp in values(qep.qps))) |> sort
     decision_inds = [private_decision_inds; shared_decision_inds]
-
+    
+    N_shared_vars = length(shared_decision_inds) + aux_dim
+    N_private_vars = sum(length.(private_decision_inds))
+   
     # total_dual_dim = sum(length(S) for S in values(qep.sets); init=0)
     # TODO shared variable length needs to include auxiliary variables?
-    total_dual_dim = N_players * N_shared_vars + sum(length(Set(values(C.group_mapping)))*length(C.poly) for C in values(qep.constraints))
+    standard_dual_dim = sum(length(Set(values(C.group_mapping)))*length(C.poly) for C in values(qep.constraints))
 
     param_inds = setdiff(Set(1:x_dim), Set(decision_inds)) |> collect |> sort
 
     player_order = collect(keys(qep.qps)) |> sort
     constraint_order = collect(keys(qep.constraints)) |> sort
     
-    #auxiliary_dims = Dict(id=>embedded_dim(qep.constraints[id].poly)-x_dim for id in constraint_order)
-    #total_aux_dim = sum(values(auxiliary_dims); init=0)
-
-    Qs, Rs, qs = map(player_order) do i
+    Qs, Mψ, Rs, qs = map(player_order) do i
         qp = qep.qps[i]
         inds = [qp.var_indices; shared_decision_inds]
-        Q = [qp.f.Q[inds, decision_inds]; spzeros(aux_dim, length(decision_inds))]
+        Q = [[qp.f.Q[inds, decision_inds]; spzeros(aux_dim, length(decision_inds))] spzeros(length(inds)+aux_dim, aux_dim)]
+        M = mapreduce(hcat, player_order) do j
+            j == i ? 
+            [spzeros(length(qp.var_indices), N_shared_vars); -sparse(I, N_shared_vars, N_shared_vars)] :
+            spzeros(length(qp.var_indices)+N_shared_vars, N_shared_vars)
+        end
         R = [qp.f.Q[inds, param_inds]; spzeros(aux_dim, length(param_inds))]
         q = [qp.f.q[inds]; zeros(aux_dim)]
-        Q, R, q
+        Q, M, R, q
     end |> (x->vcat.(x...))
+    
 
     As, A2s, Bs, ls, us = map(constraint_order) do id
         # TODO make sure that As / A2s accounts for auxiliary variables
@@ -96,7 +101,7 @@ function solve_qep(qep_base, x, shared_decision_inds=Vector{Int}(), S=nothing; d
         group_to_player_map = Dict{Int, Vector{Int}}()
         for (player, group) in player_to_group_map
             if group ∈ keys(group_to_player_map)
-                push!(group_to_player_map, player)
+                push!(group_to_player_map[group], player)
             else
                 group_to_player_map[group] = [player,]
             end
@@ -134,42 +139,72 @@ function solve_qep(qep_base, x, shared_decision_inds=Vector{Int}(), S=nothing; d
         #end
         [A1 Ax], A2, B1, l1, u1
     end |> (x->vcat.(x...))
+
     @infiltrate # works to this point
-    
+
     M11 = Qs
-    M12 = spzeros(length(decision_inds), total_aux_dim)
-    M13 = spzeros(length(decision_inds), total_dual_dim)
+    M12 = Mψ
+    M13 = spzeros(N_players*N_shared_vars+N_private_vars, standard_dual_dim)
     M14 = -A2s'
-    M21 = spzeros(total_aux_dim, length(decision_inds))
-    M22 = spzeros(total_aux_dim, total_aux_dim)
-    M23 = spzeros(total_aux_dim, total_dual_dim)
-    M24 = -Axs'
-    M31 = M13'
-    M32 = M23'
-    M33 = spzeros(total_dual_dim, total_dual_dim)
-    M34 = I(total_dual_dim)
+    M21 = spzeros(N_shared_vars, N_private_vars+N_shared_vars)
+    M22 = repeat(sparse(I, N_shared_vars, N_shared_vars), 1, N_players)
+    M23 = spzeros(N_shared_vars, standard_dual_dim)
+    M24 = spzeros(N_shared_vars, standard_dual_dim)
+    M31 = spzeros(standard_dual_dim, N_private_vars+N_shared_vars)
+    M32 = spzeros(standard_dual_dim, N_players*N_shared_vars)
+    M33 = spzeros(standard_dual_dim, standard_dual_dim)
+    M34 = sparse(I, standard_dual_dim, standard_dual_dim)
     M41 = As
-    M42 = Axs
-    M43 = -M34
-    M44 = M33
+    M42 = spzeros(standard_dual_dim, N_shared_vars*N_players)
+    M43 = -sparse(I, standard_dual_dim, standard_dual_dim)
+    M44 = spzeros(standard_dual_dim, standard_dual_dim)
+
     M = [M11 M12 M13 M14;
          M21 M22 M23 M24;
          M31 M32 M33 M34;
          M41 M42 M43 M44]
 
+   # M11 = Qs
+   # M12 = spzeros(length(decision_inds), aux_dim)
+   # M13 = spzeros(length(decision_inds), total_dual_dim)
+   # M14 = -A2s'
+   # M21 = spzeros(total_aux_dim, length(decision_inds))
+   # M22 = spzeros(total_aux_dim, total_aux_dim)
+   # M23 = spzeros(total_aux_dim, total_dual_dim)
+   # M24 = -Axs'
+   # M31 = M13'
+   # M32 = M23'
+   # M33 = spzeros(total_dual_dim, total_dual_dim)
+   # M34 = I(total_dual_dim)
+   # M41 = As
+   # M42 = Axs
+   # M43 = -M34
+   # M44 = M33
+   # M = [M11 M12 M13 M14;
+   #      M21 M22 M23 M24;
+   #      M31 M32 M33 M34;
+   #      M41 M42 M43 M44]
+
     N1 = Rs
-    N2 = spzeros(total_aux_dim, length(param_inds))
-    N3 = spzeros(total_dual_dim, length(param_inds))
+    N2 = spzeros(N_shared_vars, length(param_inds))
+    N3 = spzeros(standard_dual_dim, length(param_inds))
     N4 = Bs
+
+
+    #N1 = Rs
+    #N2 = spzeros(total_aux_dim, length(param_inds))
+    #N3 = spzeros(total_dual_dim, length(param_inds))
+    #N4 = Bs
 
     N = [N1; N2; N3; N4]
 
-    o = [qs; zeros(total_aux_dim+2*total_dual_dim)]
-    l = [fill(-Inf, length(decision_inds)+total_aux_dim); ls; fill(-Inf, total_dual_dim)]
-    u = [fill(Inf, length(decision_inds)+total_aux_dim); us; fill(Inf, total_dual_dim)]
+    o = [qs; zeros(N_shared_vars+2*standard_dual_dim)]
+    l = [fill(-Inf, length(qs)+N_shared_vars); ls; fill(-Inf, standard_dual_dim)]
+    u = [fill(Inf, length(qs)+N_shared_vars); us; fill(Inf, standard_dual_dim)]
 
     w = x[param_inds]
-    z0 = [x[decision_inds]; zeros(total_aux_dim+total_dual_dim); M41*x[decision_inds]+N4*w]
+    z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
+    @infiltrate
     avi = AVI(M, N, o, l, u)
 
     (; z, status) = solve_avi(avi, z0, w)

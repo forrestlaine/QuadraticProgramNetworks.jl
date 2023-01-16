@@ -30,7 +30,7 @@ function solve(qpn::QPNet, x_init;
             current_infeasible = !all( x ∈ qep.constraints[i].poly for i in level_constraint_ids)
             sub_count = 0
             throw_count = 0
-            if debug && level+1 < num_levels(qpn)
+            if qpn.options.debug && level+1 < num_levels(qpn)
                 println("About to reason about potentially ", 
                         potential_length(Sol_low), " pieces (depth of ", depth(Sol_low), ").")
             end    
@@ -39,7 +39,7 @@ function solve(qpn::QPNet, x_init;
                 sub_count += 1
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
-                res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimsion)
+                res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimension)
                 set_guide!(res.Sol, z->(z-x)'*(z-x))
                 new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                 better_value_found = new_fair_value < current_fair_value - qpn.options.tol
@@ -47,7 +47,7 @@ function solve(qpn::QPNet, x_init;
                 current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
                 if current_infeasible || better_value_found
                     diff = norm(x-res.x_opt)
-                    debug && println("Diff :", diff)
+                    qpn.options.debug && println("Diff :", diff)
                     x .= res.x_opt
                     all_same = false #TODO should queue all non-solutions?
                     break
@@ -69,13 +69,13 @@ function solve(qpn::QPNet, x_init;
             if !current_infeasible && !low_feasible
                 res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimension)
                 diff = norm(x-res.x_opt)
-                debug && println("Diff :", diff)
+                qpn.options.debug && println("Diff :", diff)
                 x .= res.x_opt
                 all_same = false
             end
             fin = time()
-            debug && println("Level ", level, " took ", fin-start, " seconds.") 
-            debug && display_debug(level, iters, x, sub_count, throw_count)
+            qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.") 
+            qpn.options.debug && display_debug(level, iters, x, sub_count, throw_count)
 
             if qpn.options.high_dimension 
                 if level == 1 && iters < qpn.options.high_dimension_max_iters
