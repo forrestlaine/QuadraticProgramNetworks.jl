@@ -162,37 +162,10 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); d
          M31 M32 M33 M34;
          M41 M42 M43 M44]
 
-   # M11 = Qs
-   # M12 = spzeros(length(decision_inds), aux_dim)
-   # M13 = spzeros(length(decision_inds), total_dual_dim)
-   # M14 = -A2s'
-   # M21 = spzeros(total_aux_dim, length(decision_inds))
-   # M22 = spzeros(total_aux_dim, total_aux_dim)
-   # M23 = spzeros(total_aux_dim, total_dual_dim)
-   # M24 = -Axs'
-   # M31 = M13'
-   # M32 = M23'
-   # M33 = spzeros(total_dual_dim, total_dual_dim)
-   # M34 = I(total_dual_dim)
-   # M41 = As
-   # M42 = Axs
-   # M43 = -M34
-   # M44 = M33
-   # M = [M11 M12 M13 M14;
-   #      M21 M22 M23 M24;
-   #      M31 M32 M33 M34;
-   #      M41 M42 M43 M44]
-
     N1 = Rs
     N2 = spzeros(N_shared_vars, length(param_inds))
     N3 = spzeros(standard_dual_dim, length(param_inds))
     N4 = Bs
-
-
-    #N1 = Rs
-    #N2 = spzeros(total_aux_dim, length(param_inds))
-    #N3 = spzeros(total_dual_dim, length(param_inds))
-    #N4 = Bs
 
     N = [N1; N2; N3; N4]
 

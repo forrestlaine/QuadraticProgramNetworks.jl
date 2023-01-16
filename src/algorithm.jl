@@ -1,11 +1,16 @@
 function solve(qpn::QPNet, x_init; 
         level=1,
+        halflevel=false,
         rng=MersenneTwister())
 
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init; qpn.options.debug, qpn.options.high_dimension, rng)
+        (; x_opt, Sol) = solve_qep(qep, x_init; 
+                                   qpn.options.debug, 
+                                   qpn.options.high_dimension, 
+                                   qpn.options.shared_variable_mode, 
+                                   rng)
         fin = time()
         qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
         qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
@@ -39,7 +44,11 @@ function solve(qpn::QPNet, x_init;
                 sub_count += 1
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
-                res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimension)
+                res = solve_qep(qep, x, S_keep, sub_inds; 
+                                qpn.options.debug,
+                                qpn.options.high_dimension,
+                                qpn.options.shared_variable_mode,
+                                rng)
                 set_guide!(res.Sol, z->(z-x)'*(z-x))
                 new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                 better_value_found = new_fair_value < current_fair_value - qpn.options.tol

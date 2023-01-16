@@ -190,7 +190,11 @@ end
     end
 
     net = [level_1_progs, level_2_progs]
-    options = QPN.QPNetOptions(; debug=true, high_dimension=true, gen_solution_map=false)
+    options = QPN.QPNetOptions(; debug=true, 
+                               shared_variable_mode=QPN.MIN_NORM,
+                               high_dimension=true, 
+                               gen_solution_map=false, 
+                               high_dimension_max_iters=2)
     qp_net = QPNet(qps, constraints, net, options)
     
     x = [p0; v0; reduce(vcat, ([nom; 0] for nom in poly_nominals)); zeros(T*sim_state_dim)]
