@@ -1,6 +1,5 @@
 function solve(qpn::QPNet, x_init; 
         level=1,
-        halflevel=false,
         rng=MersenneTwister())
 
     if level == num_levels(qpn)
@@ -17,7 +16,7 @@ function solve(qpn::QPNet, x_init;
         return x_opt, Sol
     else
         x = copy(x_init)
-        fair_objective = fair_obj(qpn, level) 
+        fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
         qep = gather(qpn, level)
         level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ qp.constraint_indices] for id in keys(qep.constraints))...)
         sub_inds = sub_indices(qpn, level)
