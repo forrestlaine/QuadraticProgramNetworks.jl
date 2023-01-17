@@ -5,7 +5,7 @@ function solve(qpn::QPNet, x_init;
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init; 
+        (; x_opt, Sol, f_up) = solve_qep(qep, x_init; 
                                    qpn.options.debug, 
                                    qpn.options.high_dimension, 
                                    qpn.options.shared_variable_mode, 
@@ -13,7 +13,7 @@ function solve(qpn::QPNet, x_init;
         fin = time()
         qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
         qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
-        return x_opt, Sol
+        return (; x_opt, Sol, f_up)
     else
         x = copy(x_init)
         fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
@@ -22,7 +22,10 @@ function solve(qpn::QPNet, x_init;
         sub_inds = sub_indices(qpn, level)
 
         for iters in 1:qpn.options.max_iters
-            (x_low, Sol_low) = solve(qpn, x; level=level+1, rng)
+            level_up = (qpn.options.shared_variable_mode == MIN_NORM && !qpn.options.high_dimension) ? level + 1/2 : level + 1
+            ret_low = solve(qpn, x; level=level_up, rng)
+            x_low = ret.x_opt; Sol_low = ret.Sol; f_up = ret.f_up
+            #(x_low, Sol_low, f_up) = solve(qpn, x; level=level_up, rng)
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
@@ -99,7 +102,7 @@ function solve(qpn::QPNet, x_init;
             S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=false) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
-            return x, S
+            return (; x_opt=x, Sol=S, f_up)
         end
         error("Can't find solution.")
     end

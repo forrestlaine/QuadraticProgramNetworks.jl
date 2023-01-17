@@ -45,7 +45,12 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); debug=false, high_dimension=false, shared_var_mode=SHARED_DUAL, rng=MersenneTwister(1)) 
+function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); 
+                   debug=false,
+                   high_dimension=false,
+                   shared_variable_mode=SHARED_DUAL,
+                   rng=MersenneTwister(1))
+
     x_dim = length(x)
     N_players = length(qep_base.qps)
 
@@ -61,15 +66,12 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); d
         @assert length(shared_decision_inds) > 0
     end
 
-
     private_decision_inds = reduce(vcat, (qp.var_indices for qp in values(qep.qps))) |> sort
     decision_inds = [private_decision_inds; shared_decision_inds]
     
     N_shared_vars = length(shared_decision_inds) + aux_dim
     N_private_vars = sum(length.(private_decision_inds))
    
-    # total_dual_dim = sum(length(S) for S in values(qep.sets); init=0)
-    # TODO shared variable length needs to include auxiliary variables?
     standard_dual_dim = sum(length(Set(values(C.group_mapping)))*length(C.poly) for C in values(qep.constraints))
 
     param_inds = setdiff(Set(1:x_dim), Set(decision_inds)) |> collect |> sort
@@ -176,19 +178,72 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); d
     w = x[param_inds]
     z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
     avi = AVI(M, N, o, l, u)
-
     (; z, status) = solve_avi(avi, z0, w)
     status != SUCCESS && @infiltrate
-    status != SUCCESS && error("AVI Solve error!")
-    if high_dimension
-        (; piece, x_opt) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)
-        (; x_opt, Sol=[piece,])
-    else 
-        x_opt = copy(x)
-        x_opt[decision_inds] = z[1:length(decision_inds)]
-        Sol = LocalAVISolutions(avi, z, w, decision_inds, param_inds)
-        (; x_opt, Sol)
+    status != SUCCESS && error("AVI solve error!")
+
+    ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_shared_vars+1))
+
+    if shared_variable_mode == MIN_NORM
+        if high_dimension 
+            (; piece, x_opt) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)             
+            x_param = x_opt[param_inds]
+            # IMPORTANT: not passing in ψ_inds, since by default ψ_inds will
+            # correspond to the first indices immediately after all x_dims in piece
+            f_min_norm = min_norm_objective(embedded_dim(piece), length(x_opt), length(ψ_inds))
+            (; piece, x_opt) = revise_avi_solution(f_min_norm, piece, x_opt, decision_inds, param_inds, rng)
+            @infiltrate
+            (; x_opt, Sol=[piece,], f_up=nothing)
+            (; piece, x_opt)
+        else
+            @error "not implemented yet" 
+        end
+    else
+        if high_dimension
+            (; piece, x_opt) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)
+            (; x_opt, Sol=[piece,], f_up=nothing)
+        else 
+            x_opt = copy(x)
+            x_opt[decision_inds] = z[1:length(decision_inds)]
+            Sol = LocalAVISolutions(avi, z, w, decision_inds, param_inds)
+            (; x_opt, Sol, f_up=nothing)
+        end
     end
+end
+
+"""
+f(z) = 0.5*∑(zᵢ²; i∈1...n if m<i≤m+l)
+"""
+function min_norm_objective(n, m, l)
+    Q = spzeros(n,n)
+    Q[m+1:m+l, m+1:m+l] = sparse(I, l, l)
+    Quadratic(Q, zeros(n))
+end
+
+
+function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
+    # TODO Need to make sure that x_param values don't change.
+    n = length(f.q)
+    m = length(piece)
+    (A, ll, uu, _, _) = vectorize(piece)
+    non_param_inds = setdiff(Set(collect(1:n+2m)), Set(param_inds)) |> collect |> sort
+    Mfull = [f.Q spzeros(n, m) -A';
+         spzeros(m,n) spzeros(m,m) sparse(I, m,m);
+         A -sparse(I, m, m) spzeros(m, m)]
+    N = Mfull[non_param_inds, param_inds]
+    M = Mfull[non_param_inds, non_param_inds]
+    o = [f.q;
+         zeros(2m)][non_param_inds]
+    @infiltrate
+    l = [fill(-Inf, n); ll; fill(-Inf, m)][non_param_inds]
+    u = [fill(Inf, n); uu; fill(Inf, m)][non_param_inds]
+    avi = AVI(M, N, o, l, u)
+    z0 = zeros(n+2m)[non_param_inds]
+
+    (; z, status) = solve_avi(avi, z0, x[param_inds])
+    status != SUCCESS && @infiltrate
+    status != SUCCESS && error("AVI solve error!")
+    (; piece, x_opt) = get_single_avi_solution(avi, z, x[param_inds],decision_inds, param_inds, rng)
 end
 
 #function solve_qep(qep, x, S, sub_inds; debug=false, high_dimension=false, rng=MersenneTwister(1))

@@ -98,7 +98,7 @@ mutable struct LocalAVISolutions
         new(avi, z, w, guide, vertex_queue, queued_Ks, explored_vertices, explored_Ks, polys, decision_inds, param_inds)
     end
 end
-    
+ 
 function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0)
     n = length(z)
     dx = length(decision_inds) + length(param_inds)
