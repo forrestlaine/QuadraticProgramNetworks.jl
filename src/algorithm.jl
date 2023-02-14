@@ -24,7 +24,7 @@ function solve(qpn::QPNet, x_init;
         for iters in 1:qpn.options.max_iters
             level_up = (qpn.options.shared_variable_mode == MIN_NORM && !qpn.options.high_dimension) ? level + 1/2 : level + 1
             ret_low = solve(qpn, x; level=level_up, rng)
-            x_low = ret.x_opt; Sol_low = ret.Sol; f_up = ret.f_up
+            x_low = ret_low.x_opt; Sol_low = ret_low.Sol; f_up = ret_low.f_up
             #(x_low, Sol_low, f_up) = solve(qpn, x; level=level_up, rng)
             set_guide!(Sol_low, fair_objective)
             start = time()

@@ -22,7 +22,7 @@ end
     ###################################
     
     # Parameters
-    T = 5   # number of simulation steps
+    T = 3   # number of simulation steps
     Δ = 0.10  # simulation timestep
     p0 = [0.0; 2.9] # initial configuration
     v0 = [0.0; -2.0]  # initial velocity

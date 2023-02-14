@@ -132,14 +132,68 @@ function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debu
 
     J = comp_indices(avi,z,w)
     K = random_K(J, rng)
+    nv = length(decision_inds)
+    np = length(param_inds)
+    nd = n - nv - np
+    reducible_inds = nv+1:nv+nd
+    compressed_piece = local_piece(avi,n,m,K; reducible_inds)
     piece = local_piece(avi,n,m,K)
+    @infiltrate
     permute!(piece, decision_inds, param_inds)
+    piece = partial_project(piece, dx)
 
     x = zeros(dx)
     x[decision_inds] = z[1:length(decision_inds)]
     x[param_inds] = w
 
     (; piece, x_opt=x)
+end
+
+
+"""
+    [B1 B2][x; y] = b
+l ≤ [C1 C2][x; y] ≤ u
+
+size(B2) = m × n
+if m ≥ n && rank(B2) == m
+    y can be eliminated trivially
+if m ≥ n && m > rank(B2) ≥ n
+    y can be partially eliminated trivially (I THINK)
+if m < n
+    need to think this through...
+
+"""
+function partial_project(piece, dx; tol=1e-4, sval_tol=1e-6, sp_tol=1e-8)
+    (A,l,u,_,_) = vectorize(piece)
+    eq_inds = collect(1:length(l))[isapprox.(l, u; atol=tol)]
+    iq_inds = setdiff(1:length(l), eq_inds) |> sort
+    Ae = A[eq_inds,:]
+    Ai = A[iq_inds,:]
+    b = u[eq_inds]
+    A1 = Ae[:,1:dx]
+    A2 = Ae[:,dx+1:end]
+    r = rank(A2)
+    if r == size(A2,2) # linearly independent columns
+        Atmp = A2'A2
+        pinv = mapreduce(hcat, eachrow(A2)) do a
+            sparse(Atmp \ collect(a))
+        end
+        resid = A2*pinv - I
+        droptol!(resid, sp_tol)
+        A_eq_new = resid * A1
+        b_eq_new = resid * b
+
+        A_ineq_new = Ai[:,1:dx] - Ai[:,dx+1:end] * pinv*A1
+        tmp = Ai[:,dx+1:end]*pinv*b
+        u_ineq_new = u[iq_inds]-tmp
+        l_ineq_new = l[iq_inds]-tmp
+        p = Poly([A_eq_new; A_ineq_new], [b_eq_new; l_ineq_new], [b_eq_new; u_ineq_new])
+        @infiltrate
+        return p
+    else
+        @infiltrate
+        return piece
+    end
 end
 
 function random_K(J, rng)
@@ -172,7 +226,7 @@ end
 function expand(avi,z,w,K,decision_inds,param_inds; high_dim=false)
     n = length(z)
     m = length(w)
-    piece = local_piece(avi,n,m,K)
+    piece = local_piece(avi,n,m,K,decision_inds,param_inds)
     (; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
     vertices = [ [v;w] for v in V]
     rays = [ [r.a;zero(w)] for r in R]
@@ -262,8 +316,10 @@ function Base.iterate(avi_sols::LocalAVISolutions, state)
     end
 end
 
-function find_non_trivial(A,l,u)
-    [!(isinf(l[i]) && isinf(u[i])) || all(iszero.(A[i,:])) for i in 1:length(l)]
+function find_non_trivial(A,l,u,reduced_inds)
+    # Non-trivial means at least one finite bound AND non-empty constraint
+    non_zero_rows = rowvals(A)
+    ret = [(!isinf(l[i]) || !isinf(u[i])) && i ∈ non_zero_rows for i in 1:length(l)]
 end
 
 """
@@ -272,26 +328,42 @@ K[2] : Mz+Nw+o = 0, l ≤ z ≤ u
 K[3] : Mz+Nw+o ≤ 0, z = u
 K[4] : Mz+Nw+o free, l = z = u
 """
-function local_piece(avi, n, m, K)
+function local_piece(avi, n, m, K; reducible_inds=Vector{Int}())
     A = [avi.M avi.N;
          I(n) spzeros(n,m)]
 
+    lo_reduced = []
+    up_reduced = []
     bounds = mapreduce(vcat, 1:n) do i
         if i ∈ K[1]
+            i ∈ reducible_inds && push!(lo_reduced, i)
             [-avi.o[i] Inf avi.l[i] avi.l[i]]
         elseif i ∈ K[2]
             [-avi.o[i] -avi.o[i] avi.l[i] avi.u[i]] 
         elseif i ∈ K[3]
+            i ∈ reducible_inds && push!(up_reduced, i)
             [-Inf -avi.o[i] avi.u[i] avi.u[i]]
         else
+            i ∈ reducible_inds && push!(lo_reduced, i)
             [-Inf Inf avi.l[i] avi.u[i]]
         end
     end
     l = [bounds[:,1]; bounds[:,3]]
     u = [bounds[:,2]; bounds[:,4]]
-    inds = l.>u
-    l[inds] = u[inds]
-    meaningful = find_non_trivial(A,l,u)
+    noisy_inds = l.>u
+    l[noisy_inds] = u[noisy_inds]
+
+    reduced_inds = [lo_reduced; up_reduced]
+    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
+    Al = A[:,lo_reduced]
+    Au = A[:,up_reduced]
+    A = A[:,notreduced_inds]
+
+    reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4]
+    l -= reduced_contributions
+    u -= reduced_contributions
+    
+    meaningful = find_non_trivial(A,l,u, reduced_inds)
     Poly(A[meaningful,:], l[meaningful], u[meaningful])
 end
 

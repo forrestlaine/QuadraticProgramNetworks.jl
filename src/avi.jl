@@ -181,8 +181,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     (; z, status) = solve_avi(avi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
-
-    ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_shared_vars+1))
+    ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if shared_variable_mode == MIN_NORM
         if high_dimension 
@@ -194,7 +193,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             (; piece, x_opt) = revise_avi_solution(f_min_norm, piece, x_opt, decision_inds, param_inds, rng)
             @infiltrate
             (; x_opt, Sol=[piece,], f_up=nothing)
-            (; piece, x_opt)
         else
             @error "not implemented yet" 
         end
@@ -234,7 +232,6 @@ function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
     M = Mfull[non_param_inds, non_param_inds]
     o = [f.q;
          zeros(2m)][non_param_inds]
-    @infiltrate
     l = [fill(-Inf, n); ll; fill(-Inf, m)][non_param_inds]
     u = [fill(Inf, n); uu; fill(Inf, m)][non_param_inds]
     avi = AVI(M, N, o, l, u)
