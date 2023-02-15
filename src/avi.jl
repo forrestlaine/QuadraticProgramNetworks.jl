@@ -25,7 +25,7 @@ Currently uses PATHSolver
 """
 function solve_avi(avi, z0, w)
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
-    (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, silent=false, convergence_tolerance=1e-8)
+    (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, silent=true, convergence_tolerance=1e-8)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     @infiltrate sol_bad
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
@@ -61,7 +61,11 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     else
         qep = deepcopy(qep_base)
         foreach(qp->push!(qp.constraint_indices, -1), values(qep.qps))
-        qep.constraints[-1] = Constraint(S, Dict(i=>1 for i in keys(qep.qps))) 
+        if shared_variable_mode==SHARED_DUAL
+            qep.constraints[-1] = Constraint(S, Dict(i=>1 for i in keys(qep.qps))) 
+        else
+            qep.constraints[-1] = Constraint(S, Dict(i=>i for i in keys(qep.qps))) 
+        end
         aux_dim = embedded_dim(S) - x_dim
         @assert length(shared_decision_inds) > 0
     end
@@ -108,14 +112,15 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                 group_to_player_map[group] = [player,]
             end
         end
-        num_groups = length(group_to_player_map)
+        group_labels = keys(group_to_player_map)
+        num_groups = length(group_labels)
 
         A1 = repeat(A[:, decision_inds], num_groups)
         Ax = (local_aux_dim > 0) ? repeat(A[:, x_dim+1:x_dim+local_aux_dim], num_groups) : spzeros(num_groups*length(l), aux_dim)
         B1 = repeat(A[:, param_inds], num_groups)
         l1 = repeat(l, num_groups)
         u1 = repeat(u, num_groups)
-        A2 = mapreduce(vcat, 1:num_groups) do gid
+        A2 = mapreduce(vcat, group_labels) do gid
             mapreduce(hcat, player_order) do pid
                 inds = [qep.qps[pid].var_indices; shared_decision_inds]
                 if pid ∈ group_to_player_map[gid]
@@ -175,23 +180,33 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     l = [fill(-Inf, length(qs)+N_shared_vars); ls; fill(-Inf, standard_dual_dim)]
     u = [fill(Inf, length(qs)+N_shared_vars); us; fill(Inf, standard_dual_dim)]
 
+
     w = x[param_inds]
     z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
     avi = AVI(M, N, o, l, u)
     (; z, status) = solve_avi(avi, z0, w)
+    @infiltrate
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if shared_variable_mode == MIN_NORM
         if high_dimension 
-            (; piece, x_opt) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)             
-            x_param = x_opt[param_inds]
-            # IMPORTANT: not passing in ψ_inds, since by default ψ_inds will
-            # correspond to the first indices immediately after all x_dims in piece
-            f_min_norm = min_norm_objective(embedded_dim(piece), length(x_opt), length(ψ_inds))
-            (; piece, x_opt) = revise_avi_solution(f_min_norm, piece, x_opt, decision_inds, param_inds, rng)
+            (; piece, x_opt, reduced_inds) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)
             @infiltrate
+            if length(ψ_inds) > 0
+                old_piece = piece
+                old_x_opt = x_opt
+                ## IMPORTANT: not passing in ψ_inds, since by default ψ_inds will
+                ## correspond to the first indices immediately after all x_dims in piece
+                num_remaining_ψ = length(ψ_inds) - length(intersect(ψ_inds, reduced_inds)) # ψ_inds and reduced_inds are both pre-permutation
+                f_min_norm = min_norm_objective(embedded_dim(piece), length(x_opt), num_remaining_ψ)
+                (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, x_opt, decision_inds, param_inds, rng)
+                println("ψ_val: ", norm(z_revised[length(x_opt)+1:length(x_opt)+num_remaining_ψ]))
+                new_dim = embedded_dim(piece)
+                old_dim = embedded_dim(old_piece)
+                println("Piece increased in size to ", new_dim, " from ", old_dim)
+            end
             (; x_opt, Sol=[piece,], f_up=nothing)
         else
             @error "not implemented yet" 
@@ -218,12 +233,11 @@ function min_norm_objective(n, m, l)
     Quadratic(Q, zeros(n))
 end
 
-
 function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
     # TODO Need to make sure that x_param values don't change.
-    n = length(f.q)
-    m = length(piece)
     (A, ll, uu, _, _) = vectorize(piece)
+    (m,n) = size(A)
+
     non_param_inds = setdiff(Set(collect(1:n+2m)), Set(param_inds)) |> collect |> sort
     Mfull = [f.Q spzeros(n, m) -A';
          spzeros(m,n) spzeros(m,m) sparse(I, m,m);
@@ -235,12 +249,14 @@ function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
     l = [fill(-Inf, n); ll; fill(-Inf, m)][non_param_inds]
     u = [fill(Inf, n); uu; fill(Inf, m)][non_param_inds]
     avi = AVI(M, N, o, l, u)
-    z0 = zeros(n+2m)[non_param_inds]
+    #z0 = [x; zeros(2m)][non_param_inds]
+    z0 = zeros(length(non_param_inds))
 
     (; z, status) = solve_avi(avi, z0, x[param_inds])
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
-    (; piece, x_opt) = get_single_avi_solution(avi, z, x[param_inds],decision_inds, param_inds, rng)
+    (; piece, x_opt) = get_single_avi_solution(avi, z, x[param_inds],sort(decision_inds), param_inds, rng)
+    (; piece, x_opt, z_revised=z)
 end
 
 #function solve_qep(qep, x, S, sub_inds; debug=false, high_dimension=false, rng=MersenneTwister(1))

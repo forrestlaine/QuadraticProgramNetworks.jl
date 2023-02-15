@@ -32,7 +32,7 @@ end
     M = 5.0 # centroid mass
     m = 0.5 # face mass
 
-    num_faces = 5
+    num_faces = 3
     poly_normals = [[cos(θ), sin(θ)] for θ in collect(1:num_faces)*(2*pi)/num_faces]
     poly_nominals = ones(Float64, num_faces)
     surface_normals = [[1.0, 3.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -3.0]]
@@ -194,7 +194,7 @@ end
                                shared_variable_mode=QPN.MIN_NORM,
                                high_dimension=true, 
                                gen_solution_map=false, 
-                               high_dimension_max_iters=2)
+                               high_dimension_max_iters=5)
     qp_net = QPNet(qps, constraints, net, options)
     
     x = [p0; v0; reduce(vcat, ([nom; 0] for nom in poly_nominals)); zeros(T*sim_state_dim)]
@@ -234,7 +234,7 @@ end
         push!(V, V[1])
         V
     end
-    @infiltrate
+    #@infiltrate
     for t = 1:length(pp)
         v[] = verts[t]
         p[] = Circle(Point(pp[t]...), 0.1f0)

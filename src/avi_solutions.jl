@@ -111,7 +111,7 @@ function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debu
         q = randn(rng, n)
         J = comp_indices(avi,z,w)
         K = random_K(J, rng)
-        piece = local_piece(avi,n,m,K)
+        (; piece, reduced_inds) = local_piece(avi,n,m,K)
         (A,l,u,rl,ru) = vectorize(piece)
         Aw = A[:,n+1:end]*w
         mod = OSQP.Model()
@@ -136,17 +136,16 @@ function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debu
     np = length(param_inds)
     nd = n - nv - np
     reducible_inds = nv+1:nv+nd
-    compressed_piece = local_piece(avi,n,m,K; reducible_inds)
-    piece = local_piece(avi,n,m,K)
-    @infiltrate
+    (; piece, reduced_inds) = local_piece(avi,n,m,K; reducible_inds)
+    #piece = local_piece(avi,n,m,K)
     permute!(piece, decision_inds, param_inds)
-    piece = partial_project(piece, dx)
+    #piece = partial_project(piece, dx)
 
     x = zeros(dx)
     x[decision_inds] = z[1:length(decision_inds)]
     x[param_inds] = w
 
-    (; piece, x_opt=x)
+    (; piece, x_opt=x, reduced_inds)
 end
 
 
@@ -353,6 +352,8 @@ function local_piece(avi, n, m, K; reducible_inds=Vector{Int}())
     noisy_inds = l.>u
     l[noisy_inds] = u[noisy_inds]
 
+    @infiltrate
+
     reduced_inds = [lo_reduced; up_reduced]
     notreduced_inds = setdiff(1:size(A,2), reduced_inds)
     Al = A[:,lo_reduced]
@@ -364,7 +365,7 @@ function local_piece(avi, n, m, K; reducible_inds=Vector{Int}())
     u -= reduced_contributions
     
     meaningful = find_non_trivial(A,l,u, reduced_inds)
-    Poly(A[meaningful,:], l[meaningful], u[meaningful])
+    (; piece = Poly(A[meaningful,:], l[meaningful], u[meaningful]), reduced_inds)
 end
 
 """
