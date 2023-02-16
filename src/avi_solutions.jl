@@ -195,6 +195,21 @@ function partial_project(piece, dx; tol=1e-4, sval_tol=1e-6, sp_tol=1e-8)
     end
 end
 
+"""
+K[1] : J1 ∪ J2a
+K[2] : J2b ∪ J3 ∪ J4a
+K[3] : J4b ∪ J5
+K[4] : J6
+
+IF J[7-12] exist:
+
+K[5] : J7 ∪ J8a
+K[6] : J8b ∪ J9 ∪ J10a
+K[7] : J10b ∪ J11
+K[8] : J12
+
+Jia/Jib is random partitioning of Ji
+"""
 function random_K(J, rng)
     n2 = length(J[2])
     n4 = length(J[4])
@@ -204,7 +219,19 @@ function random_K(J, rng)
     K2 = Set([J[3]; [j for (i, j) in zip(i2, J[2]) if !i]; [j for (i, j) in zip(i4, J[4]) if !i]])
     K3 = Set([J[5]; [j for (i, j) in zip(i4, J[4]) if i]])
     K4 = Set(J[6])
-    Dict(1=>K1, 2=>K2, 3=>K3, 4=>K4)
+    K = Dict(1=>K1, 2=>K2, 3=>K3, 4=>K4)
+
+    if 7 ∈ keys(J) # J are indices corresponding to GAVI solution
+        n8 = length(J[8])
+        n10 = length(J[10])
+        i8 = rand(rng, Bool, n8)
+        i10 = rand(rng, Bool, n10)
+        K[5] = Set([J[7]; [j for (i, j) in zip(i8, J[8]) if i]])
+        K[6] = Set([J[9]; [j for (i, j) in zip(i8, J[8]) if !i]; [j for (i, j) in zip(i10, J[10]) if !i]])
+        K[7] = Set([J[11]; [j for (i, j) in zip(i10, J[10]) if i]])
+        K[8] = Set(J[12])
+    end
+    K
 end
 
 function set_guide!(avi_sols::LocalAVISolutions, guide)
@@ -327,8 +354,91 @@ K[2] : Mz+Nw+o = 0, l ≤ z ≤ u
 K[3] : Mz+Nw+o ≤ 0, z = u
 K[4] : Mz+Nw+o free, l = z = u
 """
-function local_piece(avi, n, m, K; reducible_inds=Vector{Int}())
+function local_piece(avi::AVI, n, m, K; reducible_inds=Vector{Int}())
     A = [avi.M avi.N;
+         I(n) spzeros(n,m)]
+
+    lo_reduced = []
+    up_reduced = []
+    bounds = mapreduce(vcat, 1:n) do i
+        if i ∈ K[1]
+            i ∈ reducible_inds && push!(lo_reduced, i)
+            [-avi.o[i] Inf avi.l[i] avi.l[i]]
+        elseif i ∈ K[2]
+            [-avi.o[i] -avi.o[i] avi.l[i] avi.u[i]] 
+        elseif i ∈ K[3]
+            i ∈ reducible_inds && push!(up_reduced, i)
+            [-Inf -avi.o[i] avi.u[i] avi.u[i]]
+        else
+            i ∈ reducible_inds && push!(lo_reduced, i)
+            [-Inf Inf avi.l[i] avi.u[i]]
+        end
+    end
+    l = [bounds[:,1]; bounds[:,3]]
+    u = [bounds[:,2]; bounds[:,4]]
+    noisy_inds = l.>u
+    l[noisy_inds] = u[noisy_inds]
+
+    @infiltrate
+
+    reduced_inds = [lo_reduced; up_reduced]
+    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
+    Al = A[:,lo_reduced]
+    Au = A[:,up_reduced]
+    A = A[:,notreduced_inds]
+
+    reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4]
+    l -= reduced_contributions
+    u -= reduced_contributions
+    
+    meaningful = find_non_trivial(A,l,u, reduced_inds)
+    (; piece = Poly(A[meaningful,:], l[meaningful], u[meaningful]), reduced_inds)
+end
+function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}())
+    d1 = length(gavi.l1)
+    d2 = length(gavi.l2)
+    A = [gavi.M1 gavi.N1;
+         sparse(I,d1,d1) spzeros(d1,d2+m);
+         spzeros(d2,d1) sparse(I,d2,d2) spzeros(d2,m);
+         gavi.A gavi.B]
+
+    lo_reduced = []
+    up_reduced = []
+    bounds = mapreduce(vcat, 1:n) do i
+        if i ∈ K[1]
+            i ∈ reducible_inds && push!(lo_reduced, i)
+            [-avi.o[i] Inf avi.l[i] avi.l[i]]
+        elseif i ∈ K[2]
+            [-avi.o[i] -avi.o[i] avi.l[i] avi.u[i]] 
+        elseif i ∈ K[3]
+            i ∈ reducible_inds && push!(up_reduced, i)
+            [-Inf -avi.o[i] avi.u[i] avi.u[i]]
+        else
+            i ∈ reducible_inds && push!(lo_reduced, i)
+            [-Inf Inf avi.l[i] avi.u[i]]
+        end
+    end
+    l = [bounds[:,1]; bounds[:,3]]
+    u = [bounds[:,2]; bounds[:,4]]
+    noisy_inds = l.>u
+    l[noisy_inds] = u[noisy_inds]
+
+    @infiltrate
+
+    reduced_inds = [lo_reduced; up_reduced]
+    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
+    Al = A[:,lo_reduced]
+    Au = A[:,up_reduced]
+    A = A[:,notreduced_inds]
+
+    reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4]
+    l -= reduced_contributions
+    u -= reduced_contributions
+    
+    A = [avi.M1 avi.N1;
+         sparse(I,length(gavi.o1), 
+         avi.M2 avi.N2;
+         avi.A avi.B;
          I(n) spzeros(n,m)]
 
     lo_reduced = []
@@ -370,16 +480,16 @@ end
 
 """
 Form dictionary of index sets:
-J[1] = {i : lᵢ = zᵢ     , (Mz+Nw+o)ᵢ > 0 }
-J[2] = {i : lᵢ = zᵢ     , (Mz+Nw+o)ᵢ = 0 }
-J[3] = {i : lᵢ < zᵢ < uᵢ, (Mz+Nw+o)ᵢ = 0 }
-J[4] = {i :      zᵢ = uᵢ, (Mz+Nw+o)ᵢ = 0 }
-J[5] = {i :      zᵢ = uᵢ, (Mz+Nw+o)ᵢ < 0 }
-J[6] = {i : lᵢ = zᵢ = uᵢ, (Mz+Nw+o)ᵢ = 0 }
+r = Mz+Nw+o
+J[1] = {i : lᵢ = zᵢ     , rᵢ > 0 }
+J[2] = {i : lᵢ = zᵢ     , rᵢ = 0 }
+J[3] = {i : lᵢ < zᵢ < uᵢ, rᵢ = 0 }
+J[4] = {i :      zᵢ = uᵢ, rᵢ = 0 }
+J[5] = {i :      zᵢ = uᵢ, rᵢ < 0 }
+J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ = 0 }
 """
-function comp_indices(avi, z, w; tol=1e-4)
+function comp_indices(avi::AVI, r, z, w; tol=1e-4)
     J = Dict{Int, Vector{Int}}()
-    r = avi.M*z+avi.N*w+avi.o
     equal_bounds = isapprox.(avi.l, avi.u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
     J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol )
@@ -390,4 +500,53 @@ function comp_indices(avi, z, w; tol=1e-4)
     J[6] = findall( equal_bounds .&& riszero )
     @infiltrate sum(length.(values(J))) != length(z)
     return J
+end
+function comp_indices(avi::AVI, z, w; tol=1e-4)
+    r = avi.M*z+avi.N*w+avi.o
+    comp_indices(avi, r, z, w; tol)
+end
+
+"""
+Form dictionary of index sets:
+r1 = Mz+Nw+o
+d1 = length(o)
+r2 = z2
+s2 = Az+Bw
+J[1] = {i : l1ᵢ = z1ᵢ      , r1ᵢ > 0 }
+J[2] = {i : l1ᵢ = z1ᵢ      , r1ᵢ = 0 }
+J[3] = {i : l1ᵢ < z1ᵢ < u1ᵢ, r1ᵢ = 0 }
+J[4] = {i :       z1ᵢ = u1ᵢ, r1ᵢ = 0 }
+J[5] = {i :       z1ᵢ = u1ᵢ, r1ᵢ < 0 }
+J[6] = {i : l1ᵢ = z1ᵢ = u1ᵢ, r1ᵢ = 0 }
+J[7]  = {i+d1 : l2ᵢ = s2       , r2ᵢ > 0}
+J[8]  = {i+d1 : l2ᵢ = s2ᵢ      , r2ᵢ = 0}
+J[9]  = {i+d1 : l2ᵢ < s2ᵢ < u2ᵢ, r2ᵢ = 0}
+J[10] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ = 0}
+J[11] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ < 0}
+J[12] = {i+d1 : l2ᵢ = s2ᵢ = u2ᵢ, r2ᵢ = 0}
+"""
+function comp_indices(gavi::GAVI, z, w; tol=1e-4)
+    avi1 = AVI(gavi.M, gavi.N, gavi.o, gavi.l1, gavi.u1)
+    r1 = gavi.M*z+gavi.N*w+gavi.o
+    z1 = z[1:length(gavi.o)]
+    J1 = comp_indices(avi1, r1, z1, w; tol)
+   
+    d1 = length(avi.o)
+    d2 = length(avi.l2)
+    M2 = [spzeros(d2, d1) sparse(I,d2,d2)]
+    N2 = spzeros(d2, length(w))
+    o2 = zeros(d2)
+    avi2 = AVI(M2, N2, o2, gavi.l2, gavi.u2)
+    r2 = M2*z
+    s2 = gavi.A*z+gavi*B*w
+    J2 = comp_indices(avi2, r2, s2, w; tol)
+
+    J = Dict{Int, Vector{Int}}()
+    for (key,value) in J1
+        J[key] = value
+    end
+    for (key, value) in J2
+        J[key+6] = value .+ d1
+    end
+    J
 end

@@ -13,6 +13,27 @@ struct AVI
     o::Vector{Float64}
     l::Vector{Float64}
     u::Vector{Float64}
+
+"""
+Represents a generalized affine variational inequality
+(split into two conditions for computational reasons)
+
+(Mz + Nw + o) ⟂ (l₁ ≤  z₁   ≤ u₁)
+(     z₂    ) ⟂ (l₂ ≤ Az+Bw ≤ u₂)
+
+Possible todo: add support for following conditions.
+(M₃z + N₃w + o₃) ⟂ (l₃ ≤ A₃z+B₃w ≤ u₃)
+"""
+struct GAVI
+    M::SparseMatrixCSC{Float64, Int32}
+    N::SparseMatrixCSC{Float64, Int32}
+    o::Vector{Float64}
+    l1::Vector{Float64}
+    u1::Vector{Float64}
+    A::SparseMatrixCSC{Float64, Int32}
+    B::SparseMatrixCSC{Float64, Int32}
+    l2::Vector{Float64}
+    u2::Vector{Float64}
 end
 
 """
@@ -23,7 +44,7 @@ Find z, u, v, s.t.:
     v ≥ 0 ⟂ u - z ≥ 0
 Currently uses PATHSolver
 """
-function solve_avi(avi, z0, w)
+function solve_avi(avi::AVI, z0, w)
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, silent=true, convergence_tolerance=1e-8)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
@@ -33,6 +54,29 @@ function solve_avi(avi, z0, w)
     return (; z, status)
 end
 
+function solve_avi(gavi::GAVI, z0, w)
+    avi = convert(gavi)
+    d2 = length(gavi.l2)
+    z0 = [z0; zeros(d2)]
+    (; z, status) = solve_avi(avi, z0, w)
+    z = z[1:end-d2]
+    (; z, status)
+end
+
+function convert(gavi::GAVI)
+    d1 = length(gavi.l1)
+    d2 = length(gavi.l2)
+
+    M = [gavi.M spzeros(d1,d2);
+         spzeros(d2,d1) sparse(I, d2,d2) spzeros(d2,d2);
+         gavi.A -sparse(I,d2,d2)]
+    N = [gavi.N; spzeros(d2, size(gavi.N,2)); gavi.B]
+    o = [gavi.o; zeros(d2); zeros(d2)]
+    l = [gavi.l1; gavi.l2; fill(-Inf, d2)]
+    u = [gavi.u1; gavi.u2; fill(Inf, d2)]
+    AVI(M,N,o,l,u)
+end
+
 function check_avi_solution(avi, z, w; tol=1e-6)
     r = avi.M*z + avi.N*w + avi.o
     r_pos = r .> tol
@@ -40,7 +84,6 @@ function check_avi_solution(avi, z, w; tol=1e-6)
     bad_count = sum(abs.(z[r_pos]-avi.l[r_pos]) .> tol) + sum(abs.(z[r_neg]-avi.u[r_neg]) .> tol)
     return (; sol_bad = bad_count > 0, degree = bad_count, r)
 end
-
 
 """
 Solve the Quadratic Equilibrium Problem.
@@ -185,6 +228,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
     avi = AVI(M, N, o, l, u)
     (; z, status) = solve_avi(avi, z0, w)
+    (; z, gavi) = reduce(avi, z, w)
     @infiltrate
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
