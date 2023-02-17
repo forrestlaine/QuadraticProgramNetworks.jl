@@ -295,6 +295,7 @@ function min_norm_objective(n, m, l)
 end
 
 function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
+    # TODO update to use GAVI formulation (keep dims down)
     # TODO Need to make sure that x_param values don't change.
     (A, ll, uu, _, _) = vectorize(piece)
     (m,n) = size(A)
