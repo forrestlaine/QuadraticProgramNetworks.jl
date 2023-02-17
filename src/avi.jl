@@ -247,7 +247,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
     avi = AVI(Ma, Na, oa, l, u)
     (; z, status) = solve_avi(gavi, z0, w)
-    @infiltrate
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
@@ -255,7 +254,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     if shared_variable_mode == MIN_NORM
         if high_dimension 
             (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi,z,w,decision_inds,param_inds,rng; debug)
-            @infiltrate
             if length(ψ_inds) > 0
                 old_piece = piece
                 old_x_opt = x_opt
@@ -268,6 +266,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                 new_dim = embedded_dim(piece)
                 old_dim = embedded_dim(old_piece)
                 println("Piece increased in size to ", new_dim, " from ", old_dim)
+                @infiltrate
             end
             (; x_opt, Sol=[piece,], f_up=nothing)
         else
@@ -303,29 +302,33 @@ function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
     (m,n) = size(A)
 
     non_param_inds = setdiff(Set(collect(1:n+m)), Set(param_inds)) |> collect |> sort
-    npinds_1 = non_param_inds ∩ 1:n
-    npinds_2 = non_param_inds ∩ n+1:n+m
+    npinds_1 = non_param_inds ∩ (1:n)
+    npinds_2 = non_param_inds ∩ (n+1:n+m)
     J = [f.Q -A';
          A spzeros(m,m)]
+    l = [fill(-Inf, n); ll]
+    u = [fill(Inf, n); uu]
     M = J[npinds_1, non_param_inds]
     N = J[npinds_1, param_inds]
     A = J[npinds_2, non_param_inds]
     B = J[npinds_2, param_inds]
 
     #HERE
+    
+    o = f.q[npinds_1]
+    l1 = l[npinds_1]
+    u1 = u[npinds_1]
+    l2 = l[npinds_2]
+    u2 = u[npinds_2]
+    
+    gavi = GAVI(M, N, o, l1, u1, A, B, l2, u2)
+    z0 = [x; zeros(length(f.q)-length(x)); zeros(m)][non_param_inds]
 
-    o = [f.q;
-         zeros(2m)][non_param_inds]
-    l = [fill(-Inf, n); ll; fill(-Inf, m)][non_param_inds]
-    u = [fill(Inf, n); uu; fill(Inf, m)][non_param_inds]
-    avi = AVI(M, N, o, l, u)
-    #z0 = [x; zeros(2m)][non_param_inds]
-    z0 = zeros(length(non_param_inds))
-
-    (; z, status) = solve_avi(avi, z0, x[param_inds])
+    (; z, status) = solve_avi(gavi, z0, x[param_inds])
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
-    (; piece, x_opt) = get_single_avi_solution(avi, z, x[param_inds],sort(decision_inds), param_inds, rng)
+    (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi, z, x[param_inds], sort(decision_inds), param_inds, rng)
+    @infiltrate
     (; piece, x_opt, z_revised=z)
 end
 
