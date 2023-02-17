@@ -295,17 +295,25 @@ function min_norm_objective(n, m, l)
 end
 
 function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
+    # TODO refactor this to use solve_qep (need to call this function from
+    # algorithm.jl)
     # TODO update to use GAVI formulation (keep dims down)
     # TODO Need to make sure that x_param values don't change.
     (A, ll, uu, _, _) = vectorize(piece)
     (m,n) = size(A)
 
-    non_param_inds = setdiff(Set(collect(1:n+2m)), Set(param_inds)) |> collect |> sort
-    Mfull = [f.Q spzeros(n, m) -A';
-         spzeros(m,n) spzeros(m,m) sparse(I, m,m);
-         A -sparse(I, m, m) spzeros(m, m)]
-    N = Mfull[non_param_inds, param_inds]
-    M = Mfull[non_param_inds, non_param_inds]
+    non_param_inds = setdiff(Set(collect(1:n+m)), Set(param_inds)) |> collect |> sort
+    npinds_1 = non_param_inds ∩ 1:n
+    npinds_2 = non_param_inds ∩ n+1:n+m
+    J = [f.Q -A';
+         A spzeros(m,m)]
+    M = J[npinds_1, non_param_inds]
+    N = J[npinds_1, param_inds]
+    A = J[npinds_2, non_param_inds]
+    B = J[npinds_2, param_inds]
+
+    #HERE
+
     o = [f.q;
          zeros(2m)][non_param_inds]
     l = [fill(-Inf, n); ll; fill(-Inf, m)][non_param_inds]
