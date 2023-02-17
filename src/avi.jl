@@ -266,7 +266,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                 new_dim = embedded_dim(piece)
                 old_dim = embedded_dim(old_piece)
                 println("Piece increased in size to ", new_dim, " from ", old_dim)
-                @infiltrate
             end
             (; x_opt, Sol=[piece,], f_up=nothing)
         else
@@ -313,8 +312,6 @@ function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
     A = J[npinds_2, non_param_inds]
     B = J[npinds_2, param_inds]
 
-    #HERE
-    
     o = f.q[npinds_1]
     l1 = l[npinds_1]
     u1 = u[npinds_1]
@@ -328,7 +325,6 @@ function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi, z, x[param_inds], sort(decision_inds), param_inds, rng)
-    @infiltrate
     (; piece, x_opt, z_revised=z)
 end
 
