@@ -199,6 +199,7 @@ end
     
     x = [p0; v0; reduce(vcat, ([nom; 0] for nom in poly_nominals)); zeros(T*sim_state_dim)]
     x, Sol = solve(qp_net, x)
+    return
    
     # setup visualization
     f = Figure()

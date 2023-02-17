@@ -13,6 +13,7 @@ struct AVI
     o::Vector{Float64}
     l::Vector{Float64}
     u::Vector{Float64}
+end
 
 """
 Represents a generalized affine variational inequality
@@ -66,14 +67,13 @@ end
 function convert(gavi::GAVI)
     d1 = length(gavi.l1)
     d2 = length(gavi.l2)
-
     M = [gavi.M spzeros(d1,d2);
-         spzeros(d2,d1) sparse(I, d2,d2) spzeros(d2,d2);
-         gavi.A -sparse(I,d2,d2)]
-    N = [gavi.N; spzeros(d2, size(gavi.N,2)); gavi.B]
+         gavi.A -sparse(I,d2,d2);
+         spzeros(d2,d1) sparse(I, d2,d2) spzeros(d2,d2)]
+    N = [gavi.N; gavi.B; spzeros(d2, size(gavi.N,2))]
     o = [gavi.o; zeros(d2); zeros(d2)]
-    l = [gavi.l1; gavi.l2; fill(-Inf, d2)]
-    u = [gavi.u1; gavi.u2; fill(Inf, d2)]
+    l = [gavi.l1; fill(-Inf, d2); gavi.l2]
+    u = [gavi.u1; fill(Inf, d2); gavi.u2]
     AVI(M,N,o,l,u)
 end
 
@@ -207,28 +207,46 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     M43 = -sparse(I, standard_dual_dim, standard_dual_dim)
     M44 = spzeros(standard_dual_dim, standard_dual_dim)
 
-    M = [M11 M12 M13 M14;
+    Ma = [M11 M12 M13 M14;
          M21 M22 M23 M24;
          M31 M32 M33 M34;
          M41 M42 M43 M44]
+
+    M = [M11 M12 M14;
+         M21 M22 M24]
 
     N1 = Rs
     N2 = spzeros(N_shared_vars, length(param_inds))
     N3 = spzeros(standard_dual_dim, length(param_inds))
     N4 = Bs
 
-    N = [N1; N2; N3; N4]
+    Na = [N1; N2; N3; N4]
 
-    o = [qs; zeros(N_shared_vars+2*standard_dual_dim)]
+    N = [N1; N2]
+
+    oa = [qs; zeros(N_shared_vars+2*standard_dual_dim)]
+
+    o = [qs; zeros(N_shared_vars)]
+
     l = [fill(-Inf, length(qs)+N_shared_vars); ls; fill(-Inf, standard_dual_dim)]
     u = [fill(Inf, length(qs)+N_shared_vars); us; fill(Inf, standard_dual_dim)]
 
+    l1 = fill(-Inf, length(qs) + N_shared_vars)
+    u1 = fill(Inf, length(qs) + N_shared_vars)
+
+    A = [M41 M42 M44]
+    B = N4
+    l2 = ls
+    u2 = us
+
 
     w = x[param_inds]
-    z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
-    avi = AVI(M, N, o, l, u)
-    (; z, status) = solve_avi(avi, z0, w)
-    (; z, gavi) = reduce(avi, z, w)
+    z0a = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
+
+    z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); zeros(standard_dual_dim)]
+    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
+    avi = AVI(Ma, Na, oa, l, u)
+    (; z, status) = solve_avi(gavi, z0, w)
     @infiltrate
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
@@ -236,7 +254,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
 
     if shared_variable_mode == MIN_NORM
         if high_dimension 
-            (; piece, x_opt, reduced_inds) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)
+            (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi,z,w,decision_inds,param_inds,rng; debug)
             @infiltrate
             if length(ψ_inds) > 0
                 old_piece = piece
@@ -267,7 +285,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         end
     end
 end
-
 """
 f(z) = 0.5*∑(zᵢ²; i∈1...n if m<i≤m+l)
 """
