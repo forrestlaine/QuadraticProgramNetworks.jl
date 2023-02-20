@@ -1,4 +1,5 @@
 using GLMakie
+using Infiltrator
 using GeometryBasics
 
 function compute_vertices(p, normals, lengths)
@@ -24,7 +25,7 @@ end
     # Parameters
     T = 3   # number of simulation steps
     Δ = 0.10  # simulation timestep
-    p0 = [0.0; 2.9] # initial configuration
+    p0 = [0.0; 2.5] # initial configuration
     v0 = [0.0; -2.0]  # initial velocity
     g = [0.0, -0.0]  # gravity vector
     Kₚ = 50.0 
@@ -33,10 +34,13 @@ end
     m = 0.5 # face mass
 
     num_faces = 3
-    poly_normals = [[cos(θ), sin(θ)] for θ in collect(1:num_faces)*(2*pi)/num_faces]
-    poly_nominals = ones(Float64, num_faces)
-    surface_normals = [[1.0, 3.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -3.0]]
-    surface_nominals = [3.5, 0, -8.5, -20.0]
+    poly_normals = [[cos(θ), sin(θ)] for θ in collect(0:num_faces-1)*(2*pi)/num_faces .+ pi/2]
+    poly_nominals = 0.56*ones(Float64, num_faces)
+    #surface_normals = [[1.0, 3.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -3.0]]
+    #surface_nominals = [3.5, 0, -8.5, -20.0]
+    
+    surface_normals = [[0, 1.0], ]
+    surface_nominals = [1.0, ]
 
 
     # poly_normal'*(r) ≤ poly_nominal
@@ -58,8 +62,6 @@ end
 
     # vars: [ p0 v0 bd0 | λ1 r1 p1 v1 bd1 | λ2 r2 p2 v2 bd2 | ... ]
     
-
-
     sim_state_dim = num_surfaces * 2 + 4 + num_faces * 3
     total_dim = 4 + num_faces*2 + T*sim_state_dim # add initial values into state for convenience
 
@@ -106,10 +108,12 @@ end
         for f ∈ 1:num_faces
             a[3,poffset+surf_off+4+(f-1)*2+1] = -Δ*Kₚ*poly_normals[f][1]/M
             l[3] += Δ*Kₚ*poly_nominals[f]*poly_normals[f][1]/M
+            u[3] += Δ*Kₚ*poly_nominals[f]*poly_normals[f][1]/M
             a[3,poffset+surf_off+4+(f-1)*2+2] = -Δ*Kᵥ*poly_normals[f][1]/M
 
             a[4,poffset+surf_off+4+(f-1)*2+1] = -Δ*Kₚ*poly_normals[f][2]/M
             l[4] += Δ*Kₚ*poly_nominals[f]*poly_normals[f][2]/M
+            u[4] += Δ*Kₚ*poly_nominals[f]*poly_normals[f][2]/M
             a[4,poffset+surf_off+4+(f-1)*2+2] = -Δ*Kᵥ*poly_normals[f][2]/M
  
             a[4+(f-1)*2+1,offset+surf_off+4+(f-1)*2+1] = 1.0
@@ -127,16 +131,12 @@ end
             #end
             #d - d̄ - Δ * (-Kp (b-nom) - Kv (d) + λ'*n) / m  = Δ
         end
-        S_dyn = QPN.Poly(a, l, u)
-        C = QPN.Constraint(S_dyn, Dict(qp_ind=>1))
-        constraints[set_ind] = C
-        Q = spzeros(total_dim, total_dim)
-        q = zeros(total_dim)
+        Q = a'*a
+        q = -a'*l
         f = Quadratic(Q,q)
-        qp = QP(f, [set_ind,], collect(offset+surf_off+1:offset+surf_off+4+num_faces*2)) # p, v, bd. No objective just satisfy dynamics
+        qp = QP(f, [], collect(offset+surf_off+1:offset+surf_off+4+num_faces*2)) # p, v, bd. No objective just satisfy dynamics
         qps[qp_ind] = qp
         push!(level_2_progs, qp_ind)
-        set_ind += 1
         qp_ind += 1
 
         #for f in 1:num_faces
@@ -194,12 +194,17 @@ end
                                shared_variable_mode=QPN.MIN_NORM,
                                high_dimension=true, 
                                gen_solution_map=false, 
-                               high_dimension_max_iters=5)
+                               high_dimension_max_iters=1)
     qp_net = QPNet(qps, constraints, net, options)
     
     x = [p0; v0; reduce(vcat, ([nom; 0] for nom in poly_nominals)); zeros(T*sim_state_dim)]
     x, Sol = solve(qp_net, x)
-    return
+    println("Forces: ")
+    for id in sort(collect(level_1_progs))
+        println(x[qp_net.qps[id].var_indices])
+    end
+    #return
+    @infiltrate
    
     # setup visualization
     f = Figure()

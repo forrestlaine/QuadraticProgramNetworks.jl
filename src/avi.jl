@@ -46,22 +46,34 @@ Find z, u, v, s.t.:
 Currently uses PATHSolver
 """
 function solve_avi(avi::AVI, z0, w)
+    #(; sol_bad) = check_avi_solution(avi, z0, w)
+    #if false #!sol_bad
+    #    @infiltrate
+    #    return (; z=z0, status=SUCCESS)
+    #else
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, silent=true, convergence_tolerance=1e-8)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
-    @infiltrate sol_bad
+    if sol_bad
+        @infiltrate
+        return (; z, status=FAILURE)
+    end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
     status == FAILURE && @infiltrate
     return (; z, status)
+    #end
 end
 
 function solve_avi(gavi::GAVI, z0, w)
     avi = convert(gavi)
+    d1 = length(gavi.l1)
     d2 = length(gavi.l2)
-    z0 = [z0; zeros(d2)]
-    (; z, status) = solve_avi(avi, z0, w)
-    z = z[1:end-d2]
-    (; z, status)
+    s = gavi.A*z0+gavi.B*w
+    z0s = copy([z0; s])
+    (; z, status) = solve_avi(avi, z0s, w)
+    @infiltrate status == FAILURE
+    zg = z[1:d1+d2]
+    (; z=zg, status)
 end
 
 function convert(gavi::GAVI)
@@ -70,6 +82,10 @@ function convert(gavi::GAVI)
     M = [gavi.M spzeros(d1,d2);
          gavi.A -sparse(I,d2,d2);
          spzeros(d2,d1) sparse(I, d2,d2) spzeros(d2,d2)]
+    # [M   0]          z1
+    # [A  -I] z  ⟂     z2
+    # [0I  0]         l≤s≤u 
+
     N = [gavi.N; gavi.B; spzeros(d2, size(gavi.N,2))]
     o = [gavi.o; zeros(d2); zeros(d2)]
     l = [gavi.l1; fill(-Inf, d2); gavi.l2]
@@ -81,7 +97,9 @@ function check_avi_solution(avi, z, w; tol=1e-6)
     r = avi.M*z + avi.N*w + avi.o
     r_pos = r .> tol
     r_neg = r .< -tol
-    bad_count = sum(abs.(z[r_pos]-avi.l[r_pos]) .> tol) + sum(abs.(z[r_neg]-avi.u[r_neg]) .> tol)
+    bad_count = sum(abs.(z[r_pos]-avi.l[r_pos]) .> tol) + 
+                sum(abs.(z[r_neg]-avi.u[r_neg]) .> tol) +
+                sum(z-avi.l .< -tol) + sum(z-avi.u .> tol)
     return (; sol_bad = bad_count > 0, degree = bad_count, r)
 end
 
@@ -112,19 +130,22 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         aux_dim = embedded_dim(S) - x_dim
         @assert length(shared_decision_inds) > 0
     end
+    player_order = collect(keys(qep.qps)) |> sort
+    constraint_order = collect(keys(qep.constraints)) |> sort
 
-    private_decision_inds = reduce(vcat, (qp.var_indices for qp in values(qep.qps))) |> sort
+    private_decision_inds = reduce(vcat, (qep.qps[k].var_indices for k in player_order)) #|> sort
     decision_inds = [private_decision_inds; shared_decision_inds]
     
+    private_decision_labels = reduce(vcat, (repeat([Char('0'+k),], length(qep.qps[k].var_indices)) for k in player_order))
+    decision_labels = [private_decision_labels; repeat(['0',], length(shared_decision_inds))]
+
     N_shared_vars = length(shared_decision_inds) + aux_dim
     N_private_vars = sum(length.(private_decision_inds))
    
     standard_dual_dim = sum(length(Set(values(C.group_mapping)))*length(C.poly) for C in values(qep.constraints))
 
-    param_inds = setdiff(Set(1:x_dim), Set(decision_inds)) |> collect |> sort
+    param_inds = setdiff(Set(1:x_dim), Set(decision_inds)) |> collect #|> sort
 
-    player_order = collect(keys(qep.qps)) |> sort
-    constraint_order = collect(keys(qep.constraints)) |> sort
     
     Qs, Mψ, Rs, qs = map(player_order) do i
         qp = qep.qps[i]
@@ -155,7 +176,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                 group_to_player_map[group] = [player,]
             end
         end
-        group_labels = keys(group_to_player_map)
+        group_labels = keys(group_to_player_map) |> collect |> sort
         num_groups = length(group_labels)
 
         A1 = repeat(A[:, decision_inds], num_groups)
@@ -192,60 +213,38 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
 
     M11 = Qs
     M12 = Mψ
-    M13 = spzeros(N_players*N_shared_vars+N_private_vars, standard_dual_dim)
-    M14 = -A2s'
+    M13 = -A2s'
     M21 = spzeros(N_shared_vars, N_private_vars+N_shared_vars)
     M22 = repeat(sparse(I, N_shared_vars, N_shared_vars), 1, N_players)
     M23 = spzeros(N_shared_vars, standard_dual_dim)
-    M24 = spzeros(N_shared_vars, standard_dual_dim)
-    M31 = spzeros(standard_dual_dim, N_private_vars+N_shared_vars)
-    M32 = spzeros(standard_dual_dim, N_players*N_shared_vars)
+    M31 = As
+    M32 = spzeros(standard_dual_dim, N_shared_vars*N_players)
     M33 = spzeros(standard_dual_dim, standard_dual_dim)
-    M34 = sparse(I, standard_dual_dim, standard_dual_dim)
-    M41 = As
-    M42 = spzeros(standard_dual_dim, N_shared_vars*N_players)
-    M43 = -sparse(I, standard_dual_dim, standard_dual_dim)
-    M44 = spzeros(standard_dual_dim, standard_dual_dim)
 
-    Ma = [M11 M12 M13 M14;
-         M21 M22 M23 M24;
-         M31 M32 M33 M34;
-         M41 M42 M43 M44]
-
-    M = [M11 M12 M14;
-         M21 M22 M24]
+    M = [M11 M12 M13;
+         M21 M22 M23]
 
     N1 = Rs
     N2 = spzeros(N_shared_vars, length(param_inds))
-    N3 = spzeros(standard_dual_dim, length(param_inds))
-    N4 = Bs
-
-    Na = [N1; N2; N3; N4]
+    N3 = Bs
 
     N = [N1; N2]
 
-    oa = [qs; zeros(N_shared_vars+2*standard_dual_dim)]
-
     o = [qs; zeros(N_shared_vars)]
-
-    l = [fill(-Inf, length(qs)+N_shared_vars); ls; fill(-Inf, standard_dual_dim)]
-    u = [fill(Inf, length(qs)+N_shared_vars); us; fill(Inf, standard_dual_dim)]
 
     l1 = fill(-Inf, length(qs) + N_shared_vars)
     u1 = fill(Inf, length(qs) + N_shared_vars)
 
-    A = [M41 M42 M44]
-    B = N4
+    A = [M31 M32 M33]
+    B = N3
     l2 = ls
     u2 = us
 
-
     w = x[param_inds]
-    z0a = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); M41*[x[decision_inds]; zeros(aux_dim)]+N4*w; zeros(standard_dual_dim)]
 
     z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); zeros(standard_dual_dim)]
+    z_labels = [decision_labels; repeat(['a',], aux_dim); repeat(['ψ',], N_players*N_shared_vars); repeat(['λ',], standard_dual_dim)]
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
-    avi = AVI(Ma, Na, oa, l, u)
     (; z, status) = solve_avi(gavi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
@@ -253,20 +252,23 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
 
     if shared_variable_mode == MIN_NORM
         if high_dimension 
-            (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi,z,w,decision_inds,param_inds,rng; debug)
+            (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false)
             if length(ψ_inds) > 0
                 old_piece = piece
                 old_x_opt = x_opt
-                ## IMPORTANT: not passing in ψ_inds, since by default ψ_inds will
-                ## correspond to the first indices immediately after all x_dims in piece
-                num_remaining_ψ = length(ψ_inds) - length(intersect(ψ_inds, reduced_inds)) # ψ_inds and reduced_inds are both pre-permutation
-                f_min_norm = min_norm_objective(embedded_dim(piece), length(x_opt), num_remaining_ψ)
-                (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, x_opt, decision_inds, param_inds, rng)
-                println("ψ_val: ", norm(z_revised[length(x_opt)+1:length(x_opt)+num_remaining_ψ]))
+                z_inds_remaining = setdiff(1:length(z), reduced_inds)
+                ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
+                f_min_norm = min_norm_objective(length(z)-length(reduced_inds), ψ_inds_remaining)
+                zr = z[z_inds_remaining]
+                println("ψ_val before: ", f_min_norm(zr))
+                (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, zr, w, decision_inds, param_inds, rng)
+                println("ψ_val after: ", f_min_norm(z_revised[1:length(zr)]))
                 new_dim = embedded_dim(piece)
                 old_dim = embedded_dim(old_piece)
                 println("Piece increased in size to ", new_dim, " from ", old_dim)
+                @infiltrate
             end
+            permute!(piece, decision_inds, param_inds)
             (; x_opt, Sol=[piece,], f_up=nothing)
         else
             @error "not implemented yet" 
@@ -283,48 +285,47 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         end
     end
 end
+
 """
-f(z) = 0.5*∑(zᵢ²; i∈1...n if m<i≤m+l)
+f(z) = 0.5*∑(zᵢ²; i∈inds)
 """
-function min_norm_objective(n, m, l)
+function min_norm_objective(n, inds)
     Q = spzeros(n,n)
-    Q[m+1:m+l, m+1:m+l] = sparse(I, l, l)
+    foreach(i->Q[i,i]=1.0, inds) 
     Quadratic(Q, zeros(n))
 end
 
-function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
+#function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
+function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     # TODO refactor this to use solve_qep (need to call this function from
     # algorithm.jl)
-    # TODO update to use GAVI formulation (keep dims down)
-    # TODO Need to make sure that x_param values don't change.
+
     (A, ll, uu, _, _) = vectorize(piece)
     (m,n) = size(A)
 
-    non_param_inds = setdiff(Set(collect(1:n+m)), Set(param_inds)) |> collect |> sort
-    npinds_1 = non_param_inds ∩ (1:n)
-    npinds_2 = non_param_inds ∩ (n+1:n+m)
-    J = [f.Q -A';
-         A spzeros(m,m)]
-    l = [fill(-Inf, n); ll]
-    u = [fill(Inf, n); uu]
-    M = J[npinds_1, non_param_inds]
-    N = J[npinds_1, param_inds]
-    A = J[npinds_2, non_param_inds]
-    B = J[npinds_2, param_inds]
+    nz = length(zr)
+    nw = length(w)
 
-    o = f.q[npinds_1]
-    l1 = l[npinds_1]
-    u1 = u[npinds_1]
-    l2 = l[npinds_2]
-    u2 = u[npinds_2]
+    B = A[:,nz+1:nz+nw]
+    A = A[:,1:nz]
+
+    M = [f.Q -A']
+    N = spzeros(nz,nw)
+    o = f.q
+    l1 = fill(-Inf, nz)
+    u1 = fill(Inf, nz)
+    A2 = [A spzeros(m,m)]
+    l2 = ll
+    u2 = uu
     
-    gavi = GAVI(M, N, o, l1, u1, A, B, l2, u2)
-    z0 = [x; zeros(length(f.q)-length(x)); zeros(m)][non_param_inds]
-
-    (; z, status) = solve_avi(gavi, z0, x[param_inds])
+    gavi = GAVI(M, N, o, l1, u1, A2, B, l2, u2)
+    z0 = [zr; zeros(m)]
+    
+    (; z, status) = solve_avi(gavi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
-    (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi, z, x[param_inds], sort(decision_inds), param_inds, rng)
+    (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi, z, w, decision_inds, param_inds, rng; permute=false)
+    #(; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi, z, x[param_inds], sort(decision_inds), param_inds, rng)
     (; piece, x_opt, z_revised=z)
 end
 

@@ -99,7 +99,7 @@ mutable struct LocalAVISolutions
     end
 end
  
-function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0)
+function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true)
     n = length(z)
     dx = length(decision_inds) + length(param_inds)
     m = length(w)
@@ -132,14 +132,15 @@ function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debu
 
     J = comp_indices(avi,z,w)
     K = random_K(J, rng)
+
     nv = length(decision_inds)
     np = length(param_inds)
     nd = n - nv - np
-    reducible_inds = nv+1:nv+nd
+    reducible_inds = nv+1:n
     (; piece, reduced_inds) = local_piece(avi,n,m,K; reducible_inds)
-    #piece = local_piece(avi,n,m,K)
-    permute!(piece, decision_inds, param_inds)
-    #piece = partial_project(piece, dx)
+    if permute 
+        permute!(piece, decision_inds, param_inds)
+    end
 
     x = zeros(dx)
     x[decision_inds] = z[1:length(decision_inds)]
@@ -439,6 +440,8 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}())
             [-Inf 0 gavi.u2[i-d1] gavi.u2[i-d1]]
         elseif i ∈ K[8]
             [-Inf Inf gavi.l2[i-d1] gavi.u2[i-d1]]
+        else
+            @infiltrate
         end
     end
     l = [bounds[:,1]; bounds[:,3]]
@@ -455,7 +458,8 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}())
     reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4] # zero_reduced inds don't contribute
     l -= reduced_contributions
     u -= reduced_contributions
-    
+   
+    droptol!(A, 1e-8)
     meaningful = find_non_trivial(A,l,u, reduced_inds)
     (; piece = Poly(A[meaningful,:], l[meaningful], u[meaningful]), reduced_inds)
 end
@@ -529,6 +533,11 @@ function comp_indices(gavi::GAVI, z, w; tol=1e-4)
     end
     for (key, value) in J2
         J[key+6] = value .+ d1
+    end
+    for i = 1:length(z)
+        if !any(i ∈ J[j] for j in 1:12)
+            @infiltrate
+        end
     end
     J
 end
