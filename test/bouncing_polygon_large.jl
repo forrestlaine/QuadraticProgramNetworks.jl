@@ -19,28 +19,29 @@ function compute_vertices(p, normals, lengths)
 end
             
 @testset "Bouncing Polygon" begin
+    
     # Uncontrolled, no friction version
     ###################################
     
     # Parameters
-    T = 3   # number of simulation steps
-    Δ = 0.10  # simulation timestep
+    T = 10   # number of simulation steps
+    Δ = 0.15  # simulation timestep
     p0 = [0.0; 2.5] # initial configuration
     v0 = [0.0; -2.0]  # initial velocity
     g = [0.0, -0.0]  # gravity vector
-    Kₚ = 50.0 
+    Kₚ = 60.0 
     Kᵥ = 1.0
     M = 5.0 # centroid mass
     m = 0.5 # face mass
 
-    num_faces = 3
+    num_faces = 5
     poly_normals = [[cos(θ), sin(θ)] for θ in collect(0:num_faces-1)*(2*pi)/num_faces .+ pi/2]
     poly_nominals = 0.56*ones(Float64, num_faces)
-    #surface_normals = [[1.0, 3.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -3.0]]
-    #surface_nominals = [3.5, 0, -8.5, -20.0]
+    surface_normals = [[1.0, 3.0], [-1.0, 1.0], [1.0, -1.0], [-1.0, -3.0]]
+    surface_nominals = [3.5, 0, -8.5, -20.0]
     
-    surface_normals = [[0, 1.0], ]
-    surface_nominals = [1.0, ]
+    #surface_normals = [[0, 1.0], ]
+    #surface_nominals = [1.0, ]
 
 
     # poly_normal'*(r) ≤ poly_nominal
@@ -203,11 +204,11 @@ end
     for id in sort(collect(level_1_progs))
         println(x[qp_net.qps[id].var_indices])
     end
-    #return
+    return
     @infiltrate
    
     # setup visualization
-    f = Figure()
+    f = Figure(resolution=(1440,1440))
     ax = f[1, 1] = Axis(f, aspect = DataAspect())
     xlims!(ax, -5.0, 5.0)
     ylims!(ax, 0.0, 10.0)

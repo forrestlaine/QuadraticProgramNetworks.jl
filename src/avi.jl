@@ -46,13 +46,8 @@ Find z, u, v, s.t.:
 Currently uses PATHSolver
 """
 function solve_avi(avi::AVI, z0, w)
-    #(; sol_bad) = check_avi_solution(avi, z0, w)
-    #if false #!sol_bad
-    #    @infiltrate
-    #    return (; z=z0, status=SUCCESS)
-    #else
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
-    (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, silent=true, convergence_tolerance=1e-8)
+    (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, silent=false, convergence_tolerance=1e-8, cumulative_iteration_limit=100000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
         @infiltrate
@@ -64,7 +59,28 @@ function solve_avi(avi::AVI, z0, w)
     #end
 end
 
-function solve_avi(gavi::GAVI, z0, w)
+function find_closest_feasible!(gavi, z0, w)
+    model = OSQP.Model()
+    n = length(z0)
+    c = gavi.B*w
+    OSQP.setup!(model;
+                P = sparse(I, n, n),
+                q = -z0,
+                A = gavi.A,
+                l = gavi.l2-c,
+                u = gavi.u2-c,
+                verbose=false,
+                polish=true,
+                eps_abs=1e-8,
+                eps_rel=1e-8)
+    ret = OSQP.solve!(model)
+    @infiltrate ret.info.status_val != 1
+    z0 .= ret.x
+    return
+end
+
+function solve_avi(gavi::GAVI, z0, w; presolve=false)
+    presolve && find_closest_feasible!(gavi, z0, w)
     avi = convert(gavi)
     d1 = length(gavi.l1)
     d2 = length(gavi.l2)
@@ -106,7 +122,7 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}(); 
+function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                    debug=false,
                    high_dimension=false,
                    shared_variable_mode=SHARED_DUAL,
@@ -118,16 +134,19 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     if isnothing(S)
         qep = qep_base
         aux_dim = 0
+        underconstrained=false
         @assert length(shared_decision_inds) == 0
     else
         qep = deepcopy(qep_base)
         foreach(qp->push!(qp.constraint_indices, -1), values(qep.qps))
         if shared_variable_mode==SHARED_DUAL
             qep.constraints[-1] = Constraint(S, Dict(i=>1 for i in keys(qep.qps))) 
-        else
+        elseif shared_variable_mode==MIN_NORM
             qep.constraints[-1] = Constraint(S, Dict(i=>i for i in keys(qep.qps))) 
         end
         aux_dim = embedded_dim(S) - x_dim
+        constrained_lower = embedded_dim(S) - intrinsic_dim(S)
+        underconstrained = constrained_lower < (aux_dim + length(shared_decision_inds))
         @assert length(shared_decision_inds) > 0
     end
     player_order = collect(keys(qep.qps)) |> sort
@@ -136,16 +155,12 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     private_decision_inds = reduce(vcat, (qep.qps[k].var_indices for k in player_order)) #|> sort
     decision_inds = [private_decision_inds; shared_decision_inds]
     
-    private_decision_labels = reduce(vcat, (repeat([Char('0'+k),], length(qep.qps[k].var_indices)) for k in player_order))
-    decision_labels = [private_decision_labels; repeat(['0',], length(shared_decision_inds))]
-
     N_shared_vars = length(shared_decision_inds) + aux_dim
     N_private_vars = sum(length.(private_decision_inds))
    
     standard_dual_dim = sum(length(Set(values(C.group_mapping)))*length(C.poly) for C in values(qep.constraints))
 
     param_inds = setdiff(Set(1:x_dim), Set(decision_inds)) |> collect #|> sort
-
     
     Qs, Mψ, Rs, qs = map(player_order) do i
         qp = qep.qps[i]
@@ -194,25 +209,13 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                 else
                     spzeros(length(l), length(inds)+aux_dim)
                 end
-                #inds = [qep.qps[pid].var_indices; shared_decision_inds; x_dim+1:x_dim+local_aux_dim]
-                #pid ∈ group_to_player_map[gid] ? A[:, inds] : spzeros(length(l), length(inds))
             end
         end
-        #Ax = mapreduce(hcat, constraint_order) do i
-        #    (i == id) ? A[:, x_dim+1:end] : spzeros(length(l), auxiliary_dims[i])
-        #end |> (mat -> repeat(mat, num_groups, 1))
-
-        #A2 = mapreduce(hcat, player_order) do i
-        #    id ∈ keys(qep.qps[i].S) ? qep.qps[i].S[id] * (A[:, qep.qps[i].indices]) : spzeros(length(l), length(qep.qps[i].indices))
-        #end
-        #Ax = mapreduce(hcat, constraint_order) do i
-        #    (i == id) ? A[:, x_dim+1:end] : spzeros(length(l), auxiliary_dims[i])
-        #end
         [A1 Ax], A2, B1, l1, u1
     end |> (x->vcat.(x...))
 
     M11 = Qs
-    M12 = Mψ
+    M12 = underconstrained ? Mψ : spzeros(size(Mψ))
     M13 = -A2s'
     M21 = spzeros(N_shared_vars, N_private_vars+N_shared_vars)
     M22 = repeat(sparse(I, N_shared_vars, N_shared_vars), 1, N_players)
@@ -237,13 +240,17 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
 
     A = [M31 M32 M33]
     B = N3
+
     l2 = ls
     u2 = us
 
     w = x[param_inds]
-
-    z0 = [x[decision_inds]; zeros(aux_dim+N_players*N_shared_vars); zeros(standard_dual_dim)]
-    z_labels = [decision_labels; repeat(['a',], aux_dim); repeat(['ψ',], N_players*N_shared_vars); repeat(['λ',], standard_dual_dim)]
+    
+    z0 = [x[decision_inds]; zeros(aux_dim); zeros(N_players*N_shared_vars); zeros(standard_dual_dim)]
+    # TODO : if I want to support successive minimization of ||ψ|| over
+    # iterations, need to properly warmstart with previous solution? Might
+    # require reducing dimension AFTER psi minimization
+ 
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
     (; z, status) = solve_avi(gavi, z0, w)
     status != SUCCESS && @infiltrate
@@ -253,35 +260,34 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     if shared_variable_mode == MIN_NORM
         if high_dimension 
             (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false)
-            if length(ψ_inds) > 0
-                old_piece = piece
-                old_x_opt = x_opt
-                z_inds_remaining = setdiff(1:length(z), reduced_inds)
+            z_inds_remaining = setdiff(1:length(z), reduced_inds)
+            z = z[z_inds_remaining] 
+            println("Generated piece with embedded dim of ", embedded_dim(piece))
+            if length(ψ_inds) > 0 && underconstrained
                 ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
-                f_min_norm = min_norm_objective(length(z)-length(reduced_inds), ψ_inds_remaining)
-                zr = z[z_inds_remaining]
-                println("ψ_val before: ", f_min_norm(zr))
-                (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, zr, w, decision_inds, param_inds, rng)
-                println("ψ_val after: ", f_min_norm(z_revised[1:length(zr)]))
+                f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
+                println("ψ_val before: ", f_min_norm(z))
+                (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
+                println("ψ_val after: ", f_min_norm(z_revised[1:length(z)]))
                 new_dim = embedded_dim(piece)
                 old_dim = embedded_dim(old_piece)
                 println("Piece increased in size to ", new_dim, " from ", old_dim)
                 @infiltrate
             end
             permute!(piece, decision_inds, param_inds)
-            (; x_opt, Sol=[piece,], f_up=nothing)
+            (; x_opt, Sol=[piece,])
         else
             @error "not implemented yet" 
         end
     else
         if high_dimension
             (; piece, x_opt) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)
-            (; x_opt, Sol=[piece,], f_up=nothing)
+            (; x_opt, Sol=[piece,])
         else 
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
             Sol = LocalAVISolutions(avi, z, w, decision_inds, param_inds)
-            (; x_opt, Sol, f_up=nothing)
+            (; x_opt, Sol)
         end
     end
 end
