@@ -1,42 +1,44 @@
 function solve(qpn::QPNet, x_init; 
         level=1,
-        max_iters = 150,
-        tol=1e-4,
-        debug=false,
-        rng=MersenneTwister(),
-        high_dim=false,
-        high_dim_top_iters=10,
-        gen_Sol=false)
+        rng=MersenneTwister())
 
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init; debug, high_dim, rng)
+        (; x_opt, Sol) = solve_qep(qep, x_init; 
+                                   qpn.options.debug, 
+                                   qpn.options.high_dimension, 
+                                   qpn.options.shared_variable_mode, 
+                                   rng)
         fin = time()
-        debug && println("Level ", level, " took ", fin-start, " seconds.")
-        debug && display_debug(level, 1, x_opt, nothing, nothing)
-        return x_opt, Sol
+        qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
+        qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
+        return (; x_opt, Sol)
     else
         x = copy(x_init)
-        fair_objective = fair_obj(qpn, level) 
+        fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
         qep = gather(qpn, level)
-        level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ keys(qp.S)] for id in keys(qep.sets))...)
+        level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ qp.constraint_indices] for id in keys(qep.constraints))...)
         sub_inds = sub_indices(qpn, level)
 
-        for iters in 1:max_iters
-            (x_low, Sol_low) = solve(qpn, x; level=level+1, debug,  high_dim, gen_Sol=true, rng)
+        for iters in 1:qpn.options.max_iters
+            level_up = (qpn.options.shared_variable_mode == MIN_NORM && !qpn.options.high_dimension) ? level + 1/2 : level + 1
+            ret_low = solve(qpn, x; level=level_up, rng)
+            x_low = ret_low.x_opt
+            Sol_low = ret_low.Sol
+
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
-            local_Sols = [] #Vector{LocalAVISolutions}()
+            local_solutions = [] #Vector{LocalAVISolutions}()
             local_regions = Vector{Poly}()
             all_same = true
             low_feasible = false
             current_fair_value = fair_objective(x)
-            current_infeasible = !all( x ∈ qep.sets[i] for i in level_constraint_ids)
+            current_infeasible = !all( x ∈ qep.constraints[i].poly for i in level_constraint_ids)
             sub_count = 0
             throw_count = 0
-            if debug && level+1 < num_levels(qpn)
+            if qpn.options.debug && level+1 < num_levels(qpn)
                 println("About to reason about potentially ", 
                         potential_length(Sol_low), " pieces (depth of ", depth(Sol_low), ").")
             end    
@@ -45,15 +47,19 @@ function solve(qpn::QPNet, x_init;
                 sub_count += 1
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
-                res = solve_qep(qep, x, S_keep, sub_inds; high_dim)
+                res = solve_qep(qep, x, S_keep, sub_inds;
+                                qpn.options.debug,
+                                qpn.options.high_dimension,
+                                qpn.options.shared_variable_mode,
+                                rng)
                 set_guide!(res.Sol, z->(z-x)'*(z-x))
                 new_fair_value = fair_objective(res.x_opt) # caution using fair_value
-                better_value_found = new_fair_value < current_fair_value - tol
-                same_value_found = new_fair_value < current_fair_value + tol
+                better_value_found = new_fair_value < current_fair_value - qpn.options.tol
+                same_value_found = new_fair_value < current_fair_value + qpn.options.tol
                 current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
                 if current_infeasible || better_value_found
                     diff = norm(x-res.x_opt)
-                    debug && println("Diff :", diff)
+                    qpn.options.debug && println("Diff :", diff)
                     x .= res.x_opt
                     all_same = false #TODO should queue all non-solutions?
                     break
@@ -64,7 +70,7 @@ function solve(qpn::QPNet, x_init;
                     # Needed for some problems (e.g. pessimistic
                     # committment).
                     push!(local_xs, res.x_opt)
-                    push!(local_Sols, res.Sol)
+                    push!(local_solutions, res.Sol)
                     push!(local_regions, S_keep)
                 else # poor-valued neighbor
                     throw_count += 1
@@ -73,18 +79,18 @@ function solve(qpn::QPNet, x_init;
             end
 
             if !current_infeasible && !low_feasible
-                res = solve_qep(qep, x, S_keep, sub_inds; high_dim)
+                res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimension)
                 diff = norm(x-res.x_opt)
-                debug && println("Diff :", diff)
+                qpn.options.debug && println("Diff :", diff)
                 x .= res.x_opt
                 all_same = false
             end
             fin = time()
-            debug && println("Level ", level, " took ", fin-start, " seconds.") 
-            debug && display_debug(level, iters, x, sub_count, throw_count)
+            qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.") 
+            qpn.options.debug && display_debug(level, iters, x, sub_count, throw_count)
 
-            if high_dim 
-                if level == 1 && iters < high_dim_top_iters
+            if qpn.options.high_dimension 
+                if level == 1 && iters < qpn.options.high_dimension_max_iters
                     continue
                 end
             else
@@ -94,10 +100,10 @@ function solve(qpn::QPNet, x_init;
             end
 
             level_dim = length(param_indices(qpn, level))
-            S = gen_Sol ? combine(local_regions, local_Sols, level_dim; show_progress=false) : nothing
+            S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=false) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
-            return x, S
+            return (; x_opt=x, Sol=S)
         end
         error("Can't find solution.")
     end

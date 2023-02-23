@@ -12,6 +12,7 @@ using ProgressMeter
 using Polyhedra
 using Random
 using SparseArrays
+using Symbolics
 
 using Infiltrator
 
@@ -26,6 +27,6 @@ include("avi.jl")
 include("avi_solutions.jl")
 include("printing.jl")
 
-export Poly, QP, Quadratic, QPNet, solve
+export Poly, QP, Constraint, Quadratic, QPNet, solve
 
 end # module QPN

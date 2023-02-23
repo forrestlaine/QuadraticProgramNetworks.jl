@@ -1,5 +1,62 @@
-using GLMakie
-using GeometryBasics
+using Symbolics
+
+struct TriangleConstraint{T}
+    p1::Vector{T} # clockwise
+    p2::Vector{T}
+    p3::Vector{T}
+end
+
+function hs_vals(triangle_con)
+    pts = [triangle_con.p1, triangle_con.p2, triangle_con.p3, triangle_con.p1]
+    halfspaces = []
+    for i = 1:3
+        d = pts[i+1]-pts[i]
+        a = [-d[2], d[1]]
+        b = n'*pts[i]
+        push!(halfspaces, (a,b))
+    end
+    halfspaces
+end
+
+@testset "Robust Constrained" begin
+    
+    T = 10
+    Δ = 0.1
+    Δ² = 0.01
+    N_obs = 3
+    @variables(u[1:T*2], x0[1:4], x[1:T*4], s_obs[1:T*3], s_adv) .|> Symbolics.scalarize
+
+    all_vars = [x0; x; u; s_obs; s_adv]
+
+    A = [1.0 0 Δ 0;
+         0  1 0 Δ;
+         0 0 1 0;
+         0 0 0 1]
+    B = [.5Δ² 0;
+         0 .5Δ²
+         Δ 0;
+         0 Δ]
+    
+    tri1 = TriangleConstraint([5.0, 5.0], [6.0, 4.0], [4.5, 3.75])
+    
+    tris = [tri1,]
+    halfspace_groups = [hs_vals(tri) for tri in tris]
+     
+    # Dynamics
+    
+    cons = Symbolics.Num[]
+    prev = x0
+    for t = 1:T
+        append!(cons, x[(t-1)*4:t*4] - A*prev - B*u[(t-1)*2:t*2])
+        prev = x[(t-1)*4:t*4]
+    end
+     
+    A = Symbolics.sparsejacobian(cons, all_vars)
+
+end
+
+
+
 
 function compute_vertices(p, normals, lengths)
     verts = Point[]
