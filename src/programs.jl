@@ -53,8 +53,80 @@ end
 struct QPNet
     qps::Dict{Int, QP}
     constraints::Dict{Int, Constraint}
-    network::Vector{Set{Int}}
+    network::Dict{Int, Set{Int}}
     options::QPNetOptions
+    variables::Vector{Num}
+    var_indices::Dict{Num, Int}
+    QPNet(sym_vars::Vararg{Union{Num,Array{Num}}}) = begin
+        all_vars = Num[] 
+        var_inds = Dict{Num, Int}()
+        ind = 0
+        for sym_var in sym_vars
+            for (i,var) in enumerate(sym_var)
+                push!(all_vars, var)
+                var_inds[var] = ind+i
+            end
+            ind += length(sym_var)
+        end
+        qps = Dict{Int, QP}()
+        constraints = Dict{Int, Constraint}()
+        network =  Dict{Int, Set{Int}}()
+        options = QPNetOptions()
+        new(qps, constraints, network, options, all_vars, var_inds)    
+    end
+end
+
+function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
+    @assert length(cons) == length(lb) == length(ub)
+    A = Symbolics.sparsejacobian(cons, qp_net.variables)
+    rows,cols,vals = findnz(A)
+    n,m = size(A)
+    A = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    droptol!(A, tol)
+    poly = Poly(A,lb,ub)
+    mapping = Dict{Int, Int}()
+    constraint = Constraint(poly, mapping)
+    id = maximum(keys(qp_net.constraints), init=0) + 1
+    qp_net.constraints[id] = constraint
+    return id
+end
+
+function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
+    grad = Symbolics.gradient(cost, qp_net.variables)
+    Q = Symbolics.sparsejacobian(grad, qp_net.variables)
+    rows,cols,vals = findnz(Q)
+    n,m = size(Q)
+    Q = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
+    droptol!(Q, tol)
+    f = Quadratic(Q, q)
+    var_inds = mapreduce(vcat, private_vars) do var
+        inds = Vector{Int}()
+        foreach(vi->push!(inds, qp_net.var_indices[vi]), var)
+        inds
+    end
+    player_id = maximum(keys(qp_net.qps), init=0) + 1
+    qp_net.qps[player_id] = QP(f, con_inds, var_inds)
+    if level in keys(qp_net.network)
+        push!(qp_net.network[level], player_id)
+    else
+        qp_net.network[level] = Set(player_id)
+    end
+    return player_id
+end
+
+function assign_constraint_groups!(qp_net; group_map=Dict{Int, Dict{Int, Int}}())
+    for (con_id, constraint) in qp_net.constraints
+        for (player_id, qp) in qp_net.qps
+            if con_id in qp.constraint_indices
+                group_id = 
+                    (con_id ∈ keys(group_map)) && (player_id ∈ keys(group_map[con_id])) ? 
+                    group_map[con_id][player_id] : 
+                    player_id
+                constraint.group_mapping[player_id] = group_id
+            end
+        end
+    end
 end
 
 function num_levels(qpn::QPNet)
