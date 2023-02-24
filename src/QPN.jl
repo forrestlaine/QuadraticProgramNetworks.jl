@@ -1,22 +1,22 @@
 module QPN
 
-using Combinatorics
 using CDDLib
+using Combinatorics
 using DataStructures
-using LinearAlgebra
 using IterTools
+using LinearAlgebra
 using OSQP
 using PATHSolver
+using Polyhedra
 using Printf
 using ProgressMeter
-using Polyhedra
 using Random
 using SparseArrays
 using Symbolics
 
 using Infiltrator
 
-PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
+#PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
 
 include("macros.jl")
 include("sets.jl")

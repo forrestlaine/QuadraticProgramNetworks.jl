@@ -22,8 +22,7 @@ function solve(qpn::QPNet, x_init;
         sub_inds = sub_indices(qpn, level)
 
         for iters in 1:qpn.options.max_iters
-            level_up = (qpn.options.shared_variable_mode == MIN_NORM && !qpn.options.high_dimension) ? level + 1/2 : level + 1
-            ret_low = solve(qpn, x; level=level_up, rng)
+            ret_low = solve(qpn, x; level=level+1, rng)
             x_low = ret_low.x_opt
             Sol_low = ret_low.Sol
 
