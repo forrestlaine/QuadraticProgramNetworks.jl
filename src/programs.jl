@@ -11,7 +11,6 @@ function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
     Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs)) 
 end
 
-# TODO rename S to constraint_indices and indices to decision_var_indices
 struct QP
     f::Quadratic
     constraint_indices::Vector{Int}
@@ -40,7 +39,7 @@ end
     SHARED_DUAL = 2
 end
 
-Base.@kwdef struct QPNetOptions
+Base.@kwdef mutable struct QPNetOptions
     shared_variable_mode::SharedVariableMode=SHARED_DUAL
     max_iters::Int=150
     tol::Float64=1e-4
@@ -125,6 +124,16 @@ function assign_constraint_groups!(qp_net; group_map=Dict{Int, Dict{Int, Int}}()
                     player_id
                 constraint.group_mapping[player_id] = group_id
             end
+        end
+    end
+end
+
+function set_options!(qp_net; kwargs...)
+    for kwarg in kwargs
+        try
+            setfield!(qp_net.options, kwarg[1], kwarg[2])
+        catch e
+            @warn("Invalid option name / value, skipping")
         end
     end
 end
