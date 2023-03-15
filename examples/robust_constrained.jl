@@ -29,13 +29,17 @@ function dyn(x, u; Δ = 0.1)
              u[1:2]]
 end
 
-function setup(; T=10,
-                 num_obj=3,
-                 num_obj_faces=4,
+function setup(; T=2,
+                 num_obj=1,
+                 num_obj_faces=5,
+                 obstacle_spacing = 4.0,
                  lane_heading = 0.0,
+                 max_initial_speed=2.0,
                  lane_width = 10.0,
+                 initial_box_length = 6.0,
                  lane_dist_incentive = 10.0,
-                 max_accel = 1.0)
+                 max_accel = 1.0,
+                 kwargs...)
         
 
     lane_vec = [cos(lane_heading), sin(lane_heading)]
@@ -56,12 +60,19 @@ function setup(; T=10,
         end
         PolyObject(verts)
     end
+    obstacle_distances_along = collect(1:num_obj) * obstacle_spacing .+ initial_box_length / 2
+    obstacle_offsets = [-1^i for i in 1:num_obj] .* lane_width/4.0
     
     obj_halfspaces = [halfspaces(obj) for obj in objs]
     right_laneline_normal = SVector(-sin(lane_heading), cos(lane_heading))
     lane_halfspaces = [HalfSpace(right_laneline_normal, -lane_width/2), 
                        HalfSpace(-right_laneline_normal, -lane_width/2)]
+   
+    #####################################################################
     
+    # Add players responsible for identifying least-violated obstacle halfspace
+    # constraint (min s s.t. s ≥ (aᵢ'x - bᵢ)) 
+    # [recall obstacle avoidance ⇿ ∃ i s.t. aᵢ'x > bᵢ]
     for t = 1:T
         for i = 1:num_obj
             cost = s[t,i] # min s[t,i]
@@ -79,6 +90,10 @@ function setup(; T=10,
         end
     end
     
+    #####################################################################
+   
+    # Add player responsible for finding most-violated constraint
+    # (max c s.t. c <= all other constraints)
     min_cons = []
     for t = 1:T
         for lane_hs in lane_halfspaces
@@ -94,7 +109,13 @@ function setup(; T=10,
     level = 3
     cost = -c₋
     player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], c₋)
-    
+
+    #####################################################################
+
+    # Add player responsible for choosing initial state and obstacle centers
+    # to draw trajectory to boundary of infeasibility
+   
+    # Setup Dynamic Equation constraints
     dynamic_cons = []
     for t = 1:T
         if t==1
@@ -105,12 +126,38 @@ function setup(; T=10,
     end
     lb = fill(0.0, length(dynamic_cons))
     ub = fill(0.0, length(dynamic_cons))
-    con_id = QPN.add_constraint!(qp_net, dynamic_cons, lb, ub)
+    dyn_con_id = QPN.add_constraint!(qp_net, dynamic_cons, lb, ub)
+
+    # Setup Initial State constraints
+    initial_state_cons = []
+    R = [lane_vec right_laneline_normal]
+    append!(initial_state_cons, R\x̄[1:2])
+    append!(initial_state_cons, x̄[3:4])
+    lb = -[initial_box_length/2, lane_width/2, max_initial_speed, max_initial_speed]
+    ub = [initial_box_length/2, lane_width/2, max_initial_speed, max_initial_speed]
+    init_con_id = QPN.add_constraint!(qp_net, initial_state_cons, lb, ub)
+
+    # Setup Obstacle Constraints
+    obstacle_cons = []
+    lb = []
+    ub = []
+    for i in 1:num_obj
+        append!(obstacle_cons, R\o[i,:])
+        append!(lb, [obstacle_distances_along[i], obstacle_offsets[i]-lane_width/4])
+        append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/4])
+    end
+    obstacle_con_id = QPN.add_constraint!(qp_net, obstacle_cons, lb, ub)
+
     level = 2
-    loss = c₋^2
-    player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], x̄, o)
+    cost = c₋^2
+    player_id = QPN.add_qp!(qp_net, level, cost, [dyn_con_id, init_con_id, obstacle_con_id], x̄, x, o)
     
-    
+     
+    #####################################################################
+
+    # Add player responsible for choosing control variables
+    # to avoid worst-case obstacles, initial condition
+
     cons = [c₋, ]
     for t = 1:T
         append!(cons, u[t,:])
@@ -121,9 +168,10 @@ function setup(; T=10,
     
     primary_cost = sum(0.5*u[t,:]'*u[t,:] - lane_dist_incentive * x[t,1:2]'*lane_vec for t = 1:T)
     level = 1
-    player_id = QPN.add_qp!(qp_net, level, primary_cost, [con_id,], x, u)
+    player_id = QPN.add_qp!(qp_net, level, primary_cost, [con_id,], u)
 
     QPN.assign_constraint_groups!(qp_net)
+    QPN.set_options!(qp_net; kwargs...)
     
     qp_net
 end

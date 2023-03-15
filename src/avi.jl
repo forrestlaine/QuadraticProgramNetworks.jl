@@ -47,7 +47,12 @@ Currently uses PATHSolver
 """
 function solve_avi(avi::AVI, z0, w)
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
-    (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, silent=false, convergence_tolerance=1e-8, cumulative_iteration_limit=100000)
+    @infiltrate
+    (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
+                                                   silent=false, 
+                                                   convergence_tolerance=1e-8, 
+                                                   cumulative_iteration_limit=100000,
+                                                   lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
         @infiltrate
@@ -79,7 +84,7 @@ function find_closest_feasible!(gavi, z0, w)
     return
 end
 
-function solve_avi(gavi::GAVI, z0, w; presolve=false)
+function solve_avi(gavi::GAVI, z0, w; presolve=true)
     presolve && find_closest_feasible!(gavi, z0, w)
     avi = convert(gavi)
     d1 = length(gavi.l1)
@@ -252,6 +257,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     # require reducing dimension AFTER psi minimization
  
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
+    @infiltrate
     (; z, status) = solve_avi(gavi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
@@ -266,13 +272,9 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             if length(ψ_inds) > 0 && underconstrained
                 ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
                 f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
-                println("ψ_val before: ", f_min_norm(z))
+                #println("ψ_val before: ", f_min_norm(z))
                 (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
-                println("ψ_val after: ", f_min_norm(z_revised[1:length(z)]))
-                new_dim = embedded_dim(piece)
-                old_dim = embedded_dim(old_piece)
-                println("Piece increased in size to ", new_dim, " from ", old_dim)
-                @infiltrate
+                #println("ψ_val after: ", f_min_norm(z_revised[1:length(z)]))
             end
             permute!(piece, decision_inds, param_inds)
             (; x_opt, Sol=[piece,])
@@ -286,6 +288,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         else 
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
+            @infiltrate
             Sol = LocalAVISolutions(avi, z, w, decision_inds, param_inds)
             (; x_opt, Sol)
         end

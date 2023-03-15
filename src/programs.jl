@@ -43,9 +43,9 @@ Base.@kwdef mutable struct QPNetOptions
     shared_variable_mode::SharedVariableMode=SHARED_DUAL
     max_iters::Int=150
     tol::Float64=1e-4
-    high_dimension::Bool=true
+    high_dimension::Bool=false
     high_dimension_max_iters::Int=10
-    debug::Bool=false
+    debug::Bool=true
     gen_solution_map::Bool=false
 end
 
@@ -115,6 +115,7 @@ function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
 end
 
 function assign_constraint_groups!(qp_net; group_map=Dict{Int, Dict{Int, Int}}())
+    # TODO make dirty flag, set until this is called
     for (con_id, constraint) in qp_net.constraints
         for (player_id, qp) in qp_net.qps
             if con_id in qp.constraint_indices
@@ -133,7 +134,7 @@ function set_options!(qp_net; kwargs...)
         try
             setfield!(qp_net.options, kwarg[1], kwarg[2])
         catch e
-            @warn("Invalid option name / value, skipping")
+            @warn("Invalid option name $(kwarg[1]) with value $(kwarg[2]), skipping")
         end
     end
 end

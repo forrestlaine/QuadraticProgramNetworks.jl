@@ -439,6 +439,8 @@ end
 Intersect p with polys.
 """
 function poly_intersect(p::Poly, ps::Poly...)
+    d = embedded_dim(p)
+    @assert all(embedded_dim(psi) == d for psi in ps)
     union(p, ps...)
 end
 
