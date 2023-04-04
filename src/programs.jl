@@ -56,23 +56,33 @@ struct QPNet
     options::QPNetOptions
     variables::Vector{Num}
     var_indices::Dict{Num, Int}
-    QPNet(sym_vars::Vararg{Union{Num,Array{Num}}}) = begin
-        all_vars = Num[] 
-        var_inds = Dict{Num, Int}()
-        ind = 0
-        for sym_var in sym_vars
-            for (i,var) in enumerate(sym_var)
-                push!(all_vars, var)
-                var_inds[var] = ind+i
-            end
-            ind += length(sym_var)
+end
+    
+function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
+    all_vars = Num[] 
+    var_inds = Dict{Num, Int}()
+    ind = 0
+    for sym_var in sym_vars
+        for (i,var) in enumerate(sym_var)
+            push!(all_vars, var)
+            var_inds[var] = ind+i
         end
-        qps = Dict{Int, QP}()
-        constraints = Dict{Int, Constraint}()
-        network =  Dict{Int, Set{Int}}()
-        options = QPNetOptions()
-        new(qps, constraints, network, options, all_vars, var_inds)    
+        ind += length(sym_var)
     end
+    qps = Dict{Int, QP}()
+    constraints = Dict{Int, Constraint}()
+    network =  Dict{Int, Set{Int}}()
+    options = QPNetOptions()
+    QPNet(qps, constraints, network, options, all_vars, var_inds)    
+end
+
+function flatten(qpn::QPNet)
+    QPNet(qpn.qps,
+          qpn.constraints,
+          Dict(1=>Set(keys(qpn.qps))),
+          qpn.options,
+          qpn.variables,
+          qpn.var_indices)
 end
 
 function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
@@ -138,6 +148,8 @@ function set_options!(qp_net; kwargs...)
         end
     end
 end
+
+
 
 function num_levels(qpn::QPNet)
     length(qpn.network)

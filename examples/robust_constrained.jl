@@ -52,7 +52,7 @@ function setup(; T=2,
     c₋ = Symbolics.variable(:c₋)
     
     qp_net = QPNet(x,u,x̄,s,o,c₋)
-    
+ 
     objs = map(1:num_obj) do i
         verts = map(1:num_obj_faces) do j
             θ = j*2π / num_obj_faces    
