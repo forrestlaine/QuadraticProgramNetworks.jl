@@ -84,7 +84,7 @@ function find_closest_feasible!(gavi, z0, w)
     return
 end
 
-function solve_avi(gavi::GAVI, z0, w; presolve=true)
+function solve_gavi(gavi::GAVI, z0, w; presolve=true)
     presolve && find_closest_feasible!(gavi, z0, w)
     avi = convert(gavi)
     d1 = length(gavi.l1)
@@ -259,7 +259,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
  
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
     @infiltrate
-    (; z, status) = solve_avi(gavi, z0, w)
+    (; z, status) = solve_gavi(gavi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
@@ -284,8 +284,8 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         elseif shared_variable_mode == SHARED_DUAL
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
+            Sol = LocalGAVISolutions(gavi, z, w, decision_inds, param_inds)
             @infiltrate
-            Sol = LocalAVISolutions(avi, z, w, decision_inds, param_inds)
             (; x_opt, Sol)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."
@@ -327,7 +327,7 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     gavi = GAVI(M, N, o, l1, u1, A2, B, l2, u2)
     z0 = [zr; zeros(m)]
     
-    (; z, status) = solve_avi(gavi, z0, w)
+    (; z, status) = solve_gavi(gavi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, decision_inds, param_inds, rng; permute=false)
