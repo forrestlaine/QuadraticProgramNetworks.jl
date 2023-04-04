@@ -47,7 +47,6 @@ Currently uses PATHSolver
 """
 function solve_avi(avi::AVI, z0, w)
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
-    @infiltrate
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
                                                    silent=false, 
                                                    convergence_tolerance=1e-8, 
@@ -258,7 +257,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     # require reducing dimension AFTER psi minimization
  
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
-    @infiltrate
     (; z, status) = solve_gavi(gavi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
@@ -284,8 +282,8 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         elseif shared_variable_mode == SHARED_DUAL
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
-            Sol = LocalGAVISolutions(gavi, z, w, decision_inds, param_inds)
             @infiltrate
+            Sol = LocalGAVISolutions(gavi, z, w, decision_inds, param_inds)
             (; x_opt, Sol)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."

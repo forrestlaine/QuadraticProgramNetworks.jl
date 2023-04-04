@@ -8,7 +8,7 @@ f1: ½ || [x; y] - [w1; w2] ||²
 f2: ½ (y-x)²
 """
 function setup(; debug=false,
-                 shared_variable_mode=QPN.MIN_NORM,
+                 shared_variable_mode=QPN.SHARED_DUAL,
                  high_dimension=false,
                  gen_solution_map=true,
               )

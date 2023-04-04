@@ -70,6 +70,7 @@ mutable struct LocalGAVISolutions
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
     LocalGAVISolutions(gavi::GAVI, z::Vector{Float64}, w::Vector{Float64}, decision_inds::Vector{Int}, param_inds::Vector{Int}) = begin
+        @infiltrate
         n = length(z)
         m = length(w)
         J = comp_indices(gavi,z,w)
@@ -294,13 +295,15 @@ function expand(gavi,z,w,K,decision_inds,param_inds; high_dim=false)
     m = length(w)
 
     nv = length(decision_inds)
-    reducible_inds = nv+1:n
+    #reducible_inds = nv+1:n
+    reducible_inds = []
     #(; piece, reduced_inds) = local_piece(gavi,n,m,K,decision_inds,param_inds; reducible_inds)
     (; piece, reduced_inds) = local_piece(gavi,n,m,K; reducible_inds)
 
-    remaining_inds = setdiff(1:n, reduced_inds)
-    z = z[remaining_inds] 
-    n = length(z)
+    #remaining_inds = setdiff(1:n, reduced_inds)
+    #z = z[remaining_inds] 
+    #n = length(z)
+
  
     (; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
     vertices = [ [v;w] for v in V]
@@ -353,7 +356,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
     # exploration mode (either continuing or starting)
     if !isempty(gavi_sols.Ks) # if recipes available, process
         K = dequeue!(gavi_sols.Ks)
-        (; piece, exemplar, vertices) = expand(gavi_sols.avi, gavi_sols.z, gavi_sols.w, K.recipe, gavi_sols.decision_inds, gavi_sols.param_inds)
+        (; piece, exemplar, vertices) = expand(gavi_sols.gavi, gavi_sols.z, gavi_sols.w, K.recipe, gavi_sols.decision_inds, gavi_sols.param_inds)
         fval = permute_eval(gavi_sols.guide, exemplar, gavi_sols.decision_inds, gavi_sols.param_inds)
         enqueue!(gavi_sols.polys, PolyExemplar(piece, exemplar), fval) 
         push!(gavi_sols.explored_Ks, K.recipe)
@@ -422,7 +425,6 @@ end
 #    noisy_inds = l.>u
 #    l[noisy_inds] = u[noisy_inds]
 #
-#    @infiltrate
 #
 #    reduced_inds = [lo_reduced; up_reduced]
 #    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
