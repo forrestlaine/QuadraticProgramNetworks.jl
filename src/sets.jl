@@ -289,7 +289,7 @@ end
 function exemplar(poly::Poly; tol=1e-4, debug=false)
     m = OSQP.Model()
     n = length(poly)
-    n == 0 && return false
+    n == 0 && return (; empty=false, example=nothing)
     (A,l,u,rl,ru) = vectorize(poly)
     d = size(A,2)
 
