@@ -99,7 +99,7 @@ function solve(qpn::QPNet, x_init;
             end
 
             level_dim = length(param_indices(qpn, level))
-            S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=false) : nothing
+            S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=true) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
             return (; x_opt=x, Sol=S)

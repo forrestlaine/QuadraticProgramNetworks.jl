@@ -70,7 +70,6 @@ mutable struct LocalGAVISolutions
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
     LocalGAVISolutions(gavi::GAVI, z::Vector{Float64}, w::Vector{Float64}, decision_inds::Vector{Int}, param_inds::Vector{Int}) = begin
-        @infiltrate
         n = length(z)
         m = length(w)
         J = comp_indices(gavi,z,w)
