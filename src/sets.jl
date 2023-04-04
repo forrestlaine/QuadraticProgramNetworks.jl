@@ -286,10 +286,7 @@ function poly_slice(poly::Poly, x::Vector{Union{Float64, Missing}})
     end |> Set
 end
 
-"""
-Return true if polyhedron is empty.
-"""
-function Base.isempty(poly::Poly; tol=1e-4, debug=false)
+function exemplar(poly::Poly; tol=1e-4, debug=false)
     m = OSQP.Model()
     n = length(poly)
     n == 0 && return false
@@ -315,12 +312,18 @@ function Base.isempty(poly::Poly; tol=1e-4, debug=false)
                 eps_rel=1e-8)
     res = OSQP.solve!(m)
     @infiltrate debug
-    if abs(res.info.status_val) == 3
-        return true
-    else
-        t = -res.info.obj_val
-        return t < tol
-    end
+    t = -res.info.obj_val
+    empty = abs(res.info.status_val) == 3 || t < tol
+    example = empty ? nothing : res.x
+    (; empty, example)
+end
+
+"""
+Return true if polyhedron is empty.
+"""
+function Base.isempty(poly::Poly; tol=1e-4, debug=false)
+    (; empty) = exemplar(poly; tol, debug)
+    return empty
 end
 
 """

@@ -79,7 +79,7 @@ function find_closest_feasible!(gavi, z0, w)
                 eps_abs=1e-8,
                 eps_rel=1e-8)
     ret = OSQP.solve!(model)
-    @infiltrate ret.info.status_val != 1
+    (ret.info.status_val != 1) && @error "Infeasible constraints. Solve status: $(ret.info.status)"
     z0 .= ret.x
     return
 end
@@ -250,7 +250,8 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     u2 = us
 
     w = x[param_inds]
-    
+   
+    #       decision_vars       aux_vars                ψ vars                      dual_vars
     z0 = [x[decision_inds]; zeros(aux_dim); zeros(N_players*N_shared_vars); zeros(standard_dual_dim)]
     # TODO : if I want to support successive minimization of ||ψ|| over
     # iterations, need to properly warmstart with previous solution? Might
@@ -263,34 +264,31 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
-    if shared_variable_mode == MIN_NORM
-        if high_dimension 
-            (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false)
-            z_inds_remaining = setdiff(1:length(z), reduced_inds)
-            z = z[z_inds_remaining] 
-            println("Generated piece with embedded dim of ", embedded_dim(piece))
-            if length(ψ_inds) > 0 && underconstrained
-                ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
-                f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
-                #println("ψ_val before: ", f_min_norm(z))
-                (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
-                #println("ψ_val after: ", f_min_norm(z_revised[1:length(z)]))
-            end
-            permute!(piece, decision_inds, param_inds)
-            (; x_opt, Sol=[piece,])
-        else
-            @error "not implemented yet" 
+    if high_dimension
+        (; piece, x_opt, reduced_inds) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false)
+        z_inds_remaining = setdiff(1:length(z), reduced_inds)
+        z = z[z_inds_remaining] 
+        println("Generated piece with embedded dim of ", embedded_dim(piece))
+        if length(ψ_inds) > 0 && underconstrained
+            ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
+            f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
+            #println("ψ_val before: ", f_min_norm(z))
+            (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
+            #println("ψ_val after: ", f_min_norm(z_revised[1:length(z)]))
         end
+        permute!(piece, decision_inds, param_inds)
+        (; x_opt, Sol=[piece,])
     else
-        if high_dimension
-            (; piece, x_opt) = get_single_avi_solution(avi,z,w,decision_inds,param_inds,rng; debug)
-            (; x_opt, Sol=[piece,])
-        else 
+        if shared_variable_mode == MIN_NORM
+            @error "not implemented yet" 
+        elseif shared_variable_mode == SHARED_DUAL
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
             @infiltrate
             Sol = LocalAVISolutions(avi, z, w, decision_inds, param_inds)
             (; x_opt, Sol)
+        else
+            @error "Invalid shared variable mode: $shared_variable_mode."
         end
     end
 end
@@ -304,7 +302,6 @@ function min_norm_objective(n, inds)
     Quadratic(Q, zeros(n))
 end
 
-#function revise_avi_solution(f, piece, x, decision_inds, param_inds, rng)
 function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     # TODO refactor this to use solve_qep (need to call this function from
     # algorithm.jl)
@@ -333,8 +330,7 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     (; z, status) = solve_avi(gavi, z0, w)
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
-    (; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi, z, w, decision_inds, param_inds, rng; permute=false)
-    #(; piece, x_opt, reduced_inds) = get_single_avi_solution(gavi, z, x[param_inds], sort(decision_inds), param_inds, rng)
+    (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, decision_inds, param_inds, rng; permute=false)
     (; piece, x_opt, z_revised=z)
 end
 

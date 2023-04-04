@@ -99,45 +99,46 @@ mutable struct LocalAVISolutions
     end
 end
  
-function get_single_avi_solution(avi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true)
+function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true)
     n = length(z)
     dx = length(decision_inds) + length(param_inds)
     m = length(w)
 
     local piece
     local x
-    
-    for round in 1:extra_rounds
-        q = randn(rng, n)
-        J = comp_indices(avi,z,w)
-        K = random_K(J, rng)
-        (; piece, reduced_inds) = local_piece(avi,n,m,K)
-        (A,l,u,rl,ru) = vectorize(piece)
-        Aw = A[:,n+1:end]*w
-        mod = OSQP.Model()
-        OSQP.setup!(mod; 
-                    q,
-                    A=[A[:,1:n]; q'], 
-                    l = [l-Aw; -10.0], 
-                    u = [u-Aw; 10.0],
-                    verbose = false,
-                    eps_abs=1e-8,
-                    eps_rel=1e-8,
-                    polish=true)
-        res = OSQP.solve!(mod)
-        if res.info.status_val == 1
-            z = res.x
-        end
-    end
+ 
+    #for round in 1:extra_rounds
+    #    @error "Deprecated functionality -- do not trust output"
+    #    q = randn(rng, n)
+    #    J = comp_indices(gavi,z,w)
+    #    K = random_K(J, rng)
+    #    (; piece, reduced_inds) = local_piece(gavi,n,m,K)
+    #    (A,l,u,rl,ru) = vectorize(piece)
+    #    Aw = A[:,n+1:end]*w
+    #    mod = OSQP.Model()
+    #    OSQP.setup!(mod; 
+    #                q,
+    #                A=[A[:,1:n]; q'], 
+    #                l = [l-Aw; -10.0], 
+    #                u = [u-Aw; 10.0],
+    #                verbose = false,
+    #                eps_abs=1e-8,
+    #                eps_rel=1e-8,
+    #                polish=true)
+    #    res = OSQP.solve!(mod)
+    #    if res.info.status_val == 1
+    #        z = res.x
+    #    end
+    #end
 
-    J = comp_indices(avi,z,w)
+    J = comp_indices(gavi,z,w)
     K = random_K(J, rng)
 
     nv = length(decision_inds)
     np = length(param_inds)
     nd = n - nv - np
     reducible_inds = nv+1:n
-    (; piece, reduced_inds) = local_piece(avi,n,m,K; reducible_inds)
+    (; piece, reduced_inds) = local_piece(gavi,n,m,K; reducible_inds)
     if permute 
         permute!(piece, decision_inds, param_inds)
     end
@@ -281,6 +282,7 @@ function Base.iterate(avi_sols::LocalAVISolutions)
     (next, pq_state) = Base.iterate(avi_sols.polys)
     @assert !isnothing(next) # avi_sols should always have at least one piece, including at initialization
     avi_sol_state = (; pq_state, exploration_mode = false)
+
     if !isempty(next.first.poly)
         return (next.first.poly, avi_sol_state)
     else
