@@ -38,9 +38,14 @@ function potential_length(root::IntersectionRoot)
     root.len
 end
 
+function potential_length(pu::PolyUnion)
+    length(pu)
+end
+
 function depth(root::IntersectionRoot)
     length(root.pus)
 end
+depth(pu::PolyUnion) = 1
 
 function set_guide!(root::IntersectionRoot, guide)
     #todo -- is there an intelligent way to guide intersection iteration?

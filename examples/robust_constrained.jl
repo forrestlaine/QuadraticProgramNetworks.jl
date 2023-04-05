@@ -32,7 +32,7 @@ end
 function setup(; T=2,
                  num_obj=1,
                  num_obj_faces=5,
-                 obstacle_spacing = 4.0,
+                 obstacle_spacing = 10.0,
                  lane_heading = 0.0,
                  max_initial_speed=2.0,
                  lane_width = 10.0,
@@ -151,7 +151,6 @@ function setup(; T=2,
     level = 2
     cost = c₋^2
     player_id = QPN.add_qp!(qp_net, level, cost, [dyn_con_id, init_con_id, obstacle_con_id], x̄, x, o)
-    
      
     #####################################################################
 
@@ -166,7 +165,8 @@ function setup(; T=2,
     ub = [Inf; fill(max_accel, 2*T)]
     con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
     
-    primary_cost = sum(0.5*u[t,:]'*u[t,:] - lane_dist_incentive * x[t,1:2]'*lane_vec for t = 1:T)
+    #primary_cost = sum(0.5*u[t,:]'*u[t,:] - lane_dist_incentive * x[t,1:2]'*lane_vec for t = 1:T)
+    primary_cost = sum(-lane_dist_incentive * x[t,1:2]'*lane_vec for t = 1:T)
     level = 1
     player_id = QPN.add_qp!(qp_net, level, primary_cost, [con_id,], u)
 

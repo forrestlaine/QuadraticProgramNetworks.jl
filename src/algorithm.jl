@@ -89,7 +89,7 @@ function solve(qpn::QPNet, x_init;
             qpn.options.debug && display_debug(level, iters, x, sub_count, throw_count)
 
             if qpn.options.high_dimension 
-                if level == 1 && iters < qpn.options.high_dimension_max_iters
+                if level == 1 && iters < qpn.options.high_dimension_max_iters || !all_same
                     continue
                 end
             else
@@ -116,16 +116,13 @@ Zᵢᵖ ∈ { Rᵢ', Sᵢ }
 where Rᵢ' is the set complement of Rᵢ.
 """
 function combine(regions, solutions, level_dim; show_progress=false)
-    if length(solutions) == 1
-        combined = [PolyUnion([Poly(),]), collect(solutions[1])]
-        root = IntersectionRoot(combined, [0,0], level_dim)
-        #return distinct(Iterators.filter(x->intrinsic_dim(x) ≥ level_dim, Iterators.flatten(solutions)))
+    if length(solutions) == 0
+        @error "No solutions to combine..."
+    elseif length(solutions) == 1
+        first(solutions)
     else
         complements = map(complement, regions)
-        #complements = [PolyUnion([Poly(),]) for _ in regions]
         combined = [[collect(s); rc] for (rc, s) in zip(complements, solutions)]
-        root = IntersectionRoot(combined, length.(complements), level_dim; show_progress)
+        IntersectionRoot(combined, length.(complements), level_dim; show_progress)
     end
-    return root
-        #return distinct(Iterators.filter(x->intrinsic_dim(x) ≥ level_dim, root))
 end

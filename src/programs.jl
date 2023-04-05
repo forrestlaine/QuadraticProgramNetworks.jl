@@ -89,10 +89,16 @@ function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
     @assert length(cons) == length(lb) == length(ub)
     A = Symbolics.sparsejacobian(cons, qp_net.variables)
     rows,cols,vals = findnz(A)
-    n,m = size(A)
+    n, m = size(A)
     A = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
     droptol!(A, tol)
-    poly = Poly(A,lb,ub)
+
+    vals = map(cons) do con
+        vars = Symbolics.get_variables(con)
+        Symbolics.substitute(con, Dict(var=>0.0 for var in vars)).val
+    end
+    
+    poly = Poly(A,lb-vals,ub-vals)
     mapping = Dict{Int, Int}()
     constraint = Constraint(poly, mapping)
     id = maximum(keys(qp_net.constraints), init=0) + 1

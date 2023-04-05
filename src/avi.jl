@@ -266,7 +266,6 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         (; piece, x_opt, reduced_inds) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
-        println("Generated piece with embedded dim of ", embedded_dim(piece))
         if length(ψ_inds) > 0 && underconstrained
             ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
             f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
