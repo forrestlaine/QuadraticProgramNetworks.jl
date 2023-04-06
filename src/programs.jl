@@ -91,9 +91,8 @@ function get_flat_initialization(qpn::QPNet; x0 = zeros(length(qpn.variables)))
     ret.x_opt
 end
 
-function variables(name, dims...)
-    Symbolics.variables(name, dims...)
-end
+variables(name, dims...) = Symbolics.variables(name, dims...)
+variable(name) = Symbolics.variable(name)
 
 
 function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)

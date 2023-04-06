@@ -124,6 +124,7 @@ end
 Solve the Quadratic Equilibrium Problem.
 """
 function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
+                   level=0,
                    debug=false,
                    high_dimension=false,
                    shared_variable_mode=SHARED_DUAL,
@@ -261,7 +262,9 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if high_dimension
-        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false, extra_rounds=1)
+        level == 3 && @infiltrate
+        extra_rounds = level==1 ? 0 : 3
+        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
         if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM

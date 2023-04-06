@@ -21,7 +21,7 @@ function Base.show(io::IO, ::MIME"text/plain", poly::Poly)
     d = embedded_dim(poly)
     half = Int(ceil(n/2))
     println(io, space*"Polyhedron in ℝ^", d, " with ", n, " constraints.")
-    if n ≤ 50 && d ≤ 50
+    if n ≤ 100 && d ≤ 100
         (A,l,u,rl,ru) = vectorize(poly)
         for i = 1:n
             str = space*"%5.2f %2s | "

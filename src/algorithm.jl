@@ -6,6 +6,7 @@ function solve(qpn::QPNet, x_init;
         start = time()
         qep = gather(qpn, level)
         (; x_opt, Sol) = solve_qep(qep, x_init; 
+                                   level,
                                    qpn.options.debug, 
                                    qpn.options.high_dimension, 
                                    qpn.options.shared_variable_mode, 
@@ -47,6 +48,7 @@ function solve(qpn::QPNet, x_init;
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
                 res = solve_qep(qep, x, S_keep, sub_inds;
+                                level,
                                 qpn.options.debug,
                                 qpn.options.high_dimension,
                                 qpn.options.shared_variable_mode,
