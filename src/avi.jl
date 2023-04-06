@@ -58,9 +58,7 @@ function solve_avi(avi::AVI, z0, w)
         return (; z, status=FAILURE)
     end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
-    status == FAILURE && @infiltrate
     return (; z, status)
-    #end
 end
 
 function find_closest_feasible!(gavi, z0, w)
@@ -78,7 +76,7 @@ function find_closest_feasible!(gavi, z0, w)
                 eps_abs=1e-8,
                 eps_rel=1e-8)
     ret = OSQP.solve!(model)
-    (ret.info.status_val != 1) && @error "Infeasible constraints. Solve status: $(ret.info.status)"
+    (ret.info.status_val != 1) && @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
     z0 .= ret.x
     return
 end
@@ -91,7 +89,6 @@ function solve_gavi(gavi::GAVI, z0, w; presolve=true)
     s = gavi.A*z0+gavi.B*w
     z0s = copy([z0; s])
     (; z, status) = solve_avi(avi, z0s, w)
-    @infiltrate status == FAILURE
     zg = z[1:d1+d2]
     (; z=zg, status)
 end
@@ -258,20 +255,19 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
  
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
     (; z, status) = solve_gavi(gavi, z0, w)
+    
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if high_dimension
-        (; piece, x_opt, reduced_inds) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false)
+        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug, permute=false, extra_rounds=1)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
-        if length(ψ_inds) > 0 && underconstrained
+        if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM
             ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
             f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
-            #println("ψ_val before: ", f_min_norm(z))
             (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
-            #println("ψ_val after: ", f_min_norm(z_revised[1:length(z)]))
         end
         permute!(piece, decision_inds, param_inds)
         (; x_opt, Sol=[piece,])
@@ -322,8 +318,12 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     
     gavi = GAVI(M, N, o, l1, u1, A2, B, l2, u2)
     z0 = [zr; zeros(m)]
-    
-    (; z, status) = solve_gavi(gavi, z0, w)
+    local z, status
+    try 
+        (; z, status) = solve_gavi(gavi, z0, w)
+    catch e
+        @infiltrate
+    end
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, decision_inds, param_inds, rng; permute=false)

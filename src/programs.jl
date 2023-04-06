@@ -85,6 +85,17 @@ function flatten(qpn::QPNet)
           qpn.var_indices)
 end
 
+function get_flat_initialization(qpn::QPNet; x0 = zeros(length(qpn.variables)))
+    qpn_flat = flatten(qpn)
+    ret = solve(qpn_flat, x0)
+    ret.x_opt
+end
+
+function variables(name, dims...)
+    Symbolics.variables(name, dims...)
+end
+
+
 function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
     @assert length(cons) == length(lb) == length(ub)
     A = Symbolics.sparsejacobian(cons, qp_net.variables)
@@ -115,7 +126,7 @@ function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
     q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
     droptol!(Q, tol)
     f = Quadratic(Q, q)
-    var_inds = mapreduce(vcat, private_vars) do var
+    var_inds = mapreduce(vcat, private_vars; init = Int[]) do var
         inds = Vector{Int}()
         foreach(vi->push!(inds, qp_net.var_indices[vi]), var)
         inds

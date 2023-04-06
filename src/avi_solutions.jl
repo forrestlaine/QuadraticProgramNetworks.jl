@@ -93,7 +93,7 @@ mutable struct LocalGAVISolutions
     end
 end
  
-function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true)
+function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true, max_walk=1000.0)
     n = length(z)
     dx = length(decision_inds) + length(param_inds)
     m = length(w)
@@ -101,29 +101,28 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
     local piece
     local x
  
-    #for round in 1:extra_rounds
-    #    @error "Deprecated functionality -- do not trust output"
-    #    q = randn(rng, n)
-    #    J = comp_indices(gavi,z,w)
-    #    K = random_K(J, rng)
-    #    (; piece, reduced_inds) = local_piece(gavi,n,m,K)
-    #    (A,l,u,rl,ru) = vectorize(piece)
-    #    Aw = A[:,n+1:end]*w
-    #    mod = OSQP.Model()
-    #    OSQP.setup!(mod; 
-    #                q,
-    #                A=[A[:,1:n]; q'], 
-    #                l = [l-Aw; -10.0], 
-    #                u = [u-Aw; 10.0],
-    #                verbose = false,
-    #                eps_abs=1e-8,
-    #                eps_rel=1e-8,
-    #                polish=true)
-    #    res = OSQP.solve!(mod)
-    #    if res.info.status_val == 1
-    #        z = res.x
-    #    end
-    #end
+    for round in 1:extra_rounds
+        q = randn(rng, n)
+        J = comp_indices(gavi,z,w)
+        K = random_K(J, rng)
+        (; piece, reduced_inds) = local_piece(gavi,n,m,K)
+        (A,l,u,rl,ru) = vectorize(piece)
+        Aw = A[:,n+1:end]*w
+        mod = OSQP.Model()
+        OSQP.setup!(mod; 
+                    q,
+                    A=[A[:,1:n]; q'], 
+                    l = [l-Aw; -max_walk], 
+                    u = [u-Aw; max_walk],
+                    verbose = false,
+                    eps_abs=1e-8,
+                    eps_rel=1e-8,
+                    polish=true)
+        res = OSQP.solve!(mod)
+        if res.info.status_val == res.info.status_polish == 1
+            z .= res.x
+        end
+    end
 
     J = comp_indices(gavi,z,w)
     K = random_K(J, rng)
@@ -139,7 +138,7 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
     x[decision_inds] = z[1:length(decision_inds)]
     x[param_inds] = w
 
-    (; piece, x_opt=x, reduced_inds)
+    (; piece, x_opt=x, reduced_inds, z)
 end
 
 
@@ -515,19 +514,19 @@ J[2] = {i : lᵢ = zᵢ     , rᵢ = 0 }
 J[3] = {i : lᵢ < zᵢ < uᵢ, rᵢ = 0 }
 J[4] = {i :      zᵢ = uᵢ, rᵢ = 0 }
 J[5] = {i :      zᵢ = uᵢ, rᵢ < 0 }
-J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ = 0 }
+J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ free}
 """
 function comp_indices(avi::AVI, r, z, w; tol=1e-4)
     J = Dict{Int, Vector{Int}}()
     equal_bounds = isapprox.(avi.l, avi.u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
-    J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol )
+    J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
     J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
-    J[3] = findall( (avi.l.+tol .< z .< avi.u.-tol) .&& riszero )
+    J[3] = findall( (avi.l.+tol .< z .< avi.u.-tol) .&& riszero .&& .!equal_bounds)
     J[4] = findall( isapprox.(z, avi.u; atol=tol) .&& riszero .&& .!equal_bounds)
-    J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol )
-    J[6] = findall( equal_bounds .&& riszero )
-    @infiltrate sum(length.(values(J))) != length(z)
+    J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol .&& .!equal_bounds)
+    J[6] = findall( equal_bounds)
+    sum(length.(values(J))) != length(z) && throw(error("Z does not cleanly solve AVI"))
     return J
 end
 function comp_indices(avi::AVI, z, w; tol=1e-4)
@@ -546,13 +545,13 @@ J[2] = {i : l1ᵢ = z1ᵢ      , r1ᵢ = 0 }
 J[3] = {i : l1ᵢ < z1ᵢ < u1ᵢ, r1ᵢ = 0 }
 J[4] = {i :       z1ᵢ = u1ᵢ, r1ᵢ = 0 }
 J[5] = {i :       z1ᵢ = u1ᵢ, r1ᵢ < 0 }
-J[6] = {i : l1ᵢ = z1ᵢ = u1ᵢ, r1ᵢ = 0 }
-J[7]  = {i+d1 : l2ᵢ = s2       , r2ᵢ > 0}
-J[8]  = {i+d1 : l2ᵢ = s2ᵢ      , r2ᵢ = 0}
-J[9]  = {i+d1 : l2ᵢ < s2ᵢ < u2ᵢ, r2ᵢ = 0}
-J[10] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ = 0}
-J[11] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ < 0}
-J[12] = {i+d1 : l2ᵢ = s2ᵢ = u2ᵢ, r2ᵢ = 0}
+J[6] = {i : l1ᵢ = z1ᵢ = u1ᵢ, r1ᵢ free}
+J[7]  = {i+d1 : l2ᵢ = s2       , r2ᵢ > 0 }
+J[8]  = {i+d1 : l2ᵢ = s2ᵢ      , r2ᵢ = 0 }
+J[9]  = {i+d1 : l2ᵢ < s2ᵢ < u2ᵢ, r2ᵢ = 0 }
+J[10] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ = 0 }
+J[11] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ < 0 }
+J[12] = {i+d1 : l2ᵢ = s2ᵢ = u2ᵢ, r2ᵢ free}
 """
 function comp_indices(gavi::GAVI, z, w; tol=1e-4)
     avi1 = AVI(gavi.M, gavi.N, gavi.o, gavi.l1, gavi.u1)

@@ -1,4 +1,3 @@
-using Symbolics
 using StaticArrays
 using Infiltrator
 using QPN
@@ -29,7 +28,7 @@ function dyn(x, u; Δ = 0.1)
              u[1:2]]
 end
 
-function setup(; T=2,
+function setup(; T=10,
                  num_obj=1,
                  num_obj_faces=5,
                  obstacle_spacing = 10.0,
@@ -40,16 +39,15 @@ function setup(; T=2,
                  lane_dist_incentive = 10.0,
                  max_accel = 1.0,
                  kwargs...)
-        
 
     lane_vec = [cos(lane_heading), sin(lane_heading)]
     
-    x = Symbolics.variables(:x, 1:T, 1:4)
-    u = Symbolics.variables(:u, 1:T, 1:2)
-    x̄ = Symbolics.variables(:x̄, 1:4)
-    s = Symbolics.variables(:s, 1:T, 1:num_obj)
-    o = Symbolics.variables(:o, 1:num_obj, 1:2)
-    c₋ = Symbolics.variable(:c₋)
+    x = QPN.variables(:x, 1:T, 1:4)
+    u = QPN.variables(:u, 1:T, 1:2)
+    x̄ = QPN.variables(:x̄, 1:4)
+    s = QPN.variables(:s, 1:T, 1:num_obj)
+    o = QPN.variables(:o, 1:num_obj, 1:2)
+    c₋ = QPN.variable(:c₋)
     
     qp_net = QPNet(x,u,x̄,s,o,c₋)
  

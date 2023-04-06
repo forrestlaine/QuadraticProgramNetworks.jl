@@ -2,7 +2,7 @@ using Test
 using QPN
 using LinearAlgebra
 using SparseArrays
+using OSQP
 using Random
 
-include("toy.jl")
-include("bilevel_regions_small.jl")
+include("test_repeated_variable_control.jl")
