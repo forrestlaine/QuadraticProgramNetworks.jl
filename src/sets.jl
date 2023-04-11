@@ -408,7 +408,7 @@ function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6, debug=false)
     n = length(x)
     @infiltrate debug
     if n == d
-        return all( x in S for S in p )
+        return all( in(x, S; tol) for S in p )
     else
         (A,l,u,rl,ru) = vectorize(p)
         inds = collect(1:n)

@@ -120,24 +120,24 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
         (; piece, reduced_inds) = local_piece(gavi,n,m,K)
         (A,l,u,rl,ru) = vectorize(piece)
         Aw = A[:,n+1:end]*w
-        mod = OSQP.Model()
-        OSQP.setup!(mod; 
+        modl = OSQP.Model()
+        OSQP.setup!(modl; 
                     q,
                     A=[A[:,1:n]; q'], 
                     l = [l-Aw; -max_walk], 
                     u = [u-Aw; max_walk],
                     verbose = false,
-                    eps_abs=1e-14,
-                    eps_rel=1e-14,
+                    eps_abs=1e-8,
+                    eps_rel=1e-8,
                     polish_refine_iter=10000,
                     polish=true)
-        res = OSQP.solve!(mod)
-        if res.info.status_val == 1
-            if res.info.status_polish != 1
-                @info "Solved but not polished. Level=$level"
-                @infiltrate level==4
-                continue
-            end
+        res = OSQP.solve!(modl)
+        if res.info.status_val ∈ (1,2)
+            #if res.info.status_polish != 1
+            #    @info "Solved but not polished. Level=$level"
+            #    @infiltrate level==4
+            #    continue
+            #end
             if !isapprox(z, res.x; atol=1e-4)
                 successful_rounds += 1
                 z .= res.x

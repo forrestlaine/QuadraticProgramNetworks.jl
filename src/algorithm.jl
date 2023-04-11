@@ -60,7 +60,7 @@ function solve(qpn::QPNet, x_init;
                 current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
                 if current_infeasible || better_value_found
                     diff = norm(x-res.x_opt)
-                    qpn.options.debug && println("Diff :", diff)
+                    qpn.options.debug && println("Better value found! $new_fair_value vs $current_fair_value")
                     x .= res.x_opt
                     all_same = false #TODO should queue all non-solutions?
                     break

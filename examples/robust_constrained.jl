@@ -17,7 +17,7 @@ function halfspaces(poly_obj::PolyObject{D, T}) where {D, T}
     map(1:N) do i
         ii = mod1(i+1, N)
         d = poly_obj.verts[ii] - poly_obj.verts[i]
-        a = SVector(-d[2], d[1])
+        a = SVector(d[2], -d[1])
         b = a'*poly_obj.verts[i]
         HalfSpace(a, b)
     end
@@ -28,10 +28,10 @@ function dyn(x, u; Δ = 0.1)
              u[1:2]]
 end
 
-function setup(; T=10,
-                 num_obj=2,
-                 num_obj_faces=5,
-                 obstacle_spacing = 3.0,
+function setup(; T=5,
+                 num_obj=1,
+                 num_obj_faces=4,
+                 obstacle_spacing = 1.0,
                  lane_heading = 0.0,
                  initial_speed=3.0,
                  lane_width = 10.0,
@@ -46,7 +46,7 @@ function setup(; T=10,
     u = QPN.variables(:u, 1:2, 1:T)
     x̄ = QPN.variables(:x̄, 1:4)
     s = QPN.variables(:s, 1:num_obj, 1:T)
-    o = QPN.variables(:o, 1:num_obj, 1:2)
+    o = QPN.variables(:o, 1:2, 1:num_obj)
     c₋ = QPN.variable(:c₋)
     
     qp_net = QPNet(x,u,x̄,s,o,c₋)
@@ -54,7 +54,7 @@ function setup(; T=10,
     objs = map(1:num_obj) do i
         verts = map(1:num_obj_faces) do j
             θ = j*2π / num_obj_faces    
-            SVector(o[i,1]+cos(θ), o[i,2]+sin(θ))
+            SVector(o[1, i]+cos(θ), o[2, i]+sin(θ))
         end
         PolyObject(verts)
     end
@@ -140,14 +140,14 @@ function setup(; T=10,
     lb = []
     ub = []
     for i in 1:num_obj
-        append!(obstacle_cons, R\o[i,:])
+        append!(obstacle_cons, R\o[:,i])
         append!(lb, [obstacle_distances_along[i], obstacle_offsets[i]-lane_width/4])
         append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/4])
     end
     obstacle_con_id = QPN.add_constraint!(qp_net, obstacle_cons, lb, ub)
 
     level = 3
-    cost = c₋^2
+    cost = (c₋ + 0.05)^2
     player_id = QPN.add_qp!(qp_net, level, cost, [dyn_con_id, init_con_id, obstacle_con_id], x̄, x, o)
 
     #####################################################################
