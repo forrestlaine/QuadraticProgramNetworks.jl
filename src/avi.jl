@@ -76,9 +76,11 @@ function find_closest_feasible!(gavi, z0, w)
                 eps_abs=1e-8,
                 eps_rel=1e-8)
     ret = OSQP.solve!(model)
-    (ret.info.status_val != 1) && @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
-    z0 .= ret.x
-    return
+    if ret.info.status_val == 1
+        z0 .= ret.x
+    else
+        @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
+    end
 end
 
 function solve_gavi(gavi::GAVI, z0, w; presolve=true)
@@ -127,6 +129,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                    level=0,
                    debug=false,
                    high_dimension=false,
+                   gen_sol=true,
                    shared_variable_mode=SHARED_DUAL,
                    rng=MersenneTwister(1))
 
@@ -262,8 +265,8 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if high_dimension
-        level == 3 && @infiltrate
-        extra_rounds = level==1 ? 0 : 3
+        extra_rounds = level==1 ? 0 : 5
+        #level == 3 && @infiltrate
         (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
@@ -272,7 +275,9 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
             (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
         end
+        @infiltrate [z;w] ∉ piece
         permute!(piece, decision_inds, param_inds)
+        #level == 3 && @infiltrate
         (; x_opt, Sol=[piece,])
     else
         if shared_variable_mode == MIN_NORM
@@ -280,7 +285,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         elseif shared_variable_mode == SHARED_DUAL
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
-            Sol = LocalGAVISolutions(gavi, z, w, decision_inds, param_inds)
+            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, decision_inds, param_inds) : nothing
             (; x_opt, Sol)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."

@@ -119,7 +119,7 @@ where Rᵢ' is the set complement of Rᵢ.
 """
 function combine(regions, solutions, level_dim; show_progress=false)
     if length(solutions) == 0
-        @error "No solutions to combine..."
+        @error "No solutions to combine... length solutions: 0, length regions: $(length(regions))"
     elseif length(solutions) == 1
         first(solutions)
     else

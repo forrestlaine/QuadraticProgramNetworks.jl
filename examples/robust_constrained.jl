@@ -131,8 +131,10 @@ function setup(; T=5,
     R = [lane_vec right_laneline_normal]
     append!(initial_state_cons, R\x̄[1:2])
     append!(initial_state_cons, x̄[3:4])
-    lb = [-initial_box_length/2, -lane_width/2, initial_speed, 0.0]
-    ub = [initial_box_length/2, lane_width/2, initial_speed, 0.0]
+    #lb = [-initial_box_length/2, -lane_width/2, initial_speed, 0.0]
+    #ub = [initial_box_length/2, lane_width/2, initial_speed, 0.0]
+    lb = [0, 0, initial_speed, 0.0]
+    ub = [0, 0, initial_speed, 0.0]
     init_con_id = QPN.add_constraint!(qp_net, initial_state_cons, lb, ub)
 
     # Setup Obstacle Constraints
@@ -141,13 +143,13 @@ function setup(; T=5,
     ub = []
     for i in 1:num_obj
         append!(obstacle_cons, R\o[:,i])
-        append!(lb, [obstacle_distances_along[i], obstacle_offsets[i]-lane_width/4])
-        append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/4])
+        append!(lb, [obstacle_distances_along[i], obstacle_offsets[i]-lane_width/5])
+        append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/5])
     end
     obstacle_con_id = QPN.add_constraint!(qp_net, obstacle_cons, lb, ub)
 
     level = 3
-    cost = (c₋ + 0.05)^2
+    cost = (c₋)^2
     player_id = QPN.add_qp!(qp_net, level, cost, [dyn_con_id, init_con_id, obstacle_con_id], x̄, x, o)
 
     #####################################################################

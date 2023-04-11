@@ -165,7 +165,13 @@ function set_options!(qp_net; kwargs...)
     end
 end
 
-
+function display_solution(qpn::QPNet, x)
+    for var in qpn.variables
+        idx = qpn.var_indices[var]
+        val = x[idx]
+        @info "($idx) $var => $val"
+    end
+end
 
 function num_levels(qpn::QPNet)
     length(qpn.network)

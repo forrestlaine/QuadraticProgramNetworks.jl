@@ -101,22 +101,14 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
     local piece
     local x
 
-    successful_rounds = 0
     @infiltrate debug
 
     J = comp_indices(gavi,z,w)
-    #if length(J[2]) == length(J[4]) == length(J[8]) == length(J[10]) == 0
-    #    K = random_K(J, rng)
-    #    (; piece, reduced_inds) = local_piece(gavi,n,m,K)
-    #    if intrinsic_dim(piece) ≤ length(w)
-    #        extra_rounds = 0
-    #    end
-    #end
+    #K = random_K(J, rng)
+    K = max_freedom_K(J)
  
     for round in 1:extra_rounds
         q = randn(rng, n)
-        J = comp_indices(gavi,z,w)
-        K = random_K(J, rng)
         (; piece, reduced_inds) = local_piece(gavi,n,m,K)
         (A,l,u,rl,ru) = vectorize(piece)
         Aw = A[:,n+1:end]*w
@@ -139,23 +131,20 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
             #    continue
             #end
             if !isapprox(z, res.x; atol=1e-4)
-                successful_rounds += 1
                 z .= res.x
+                J = comp_indices(gavi,z,w)
+                K = max_freedom_K(J)
                 break
             end
         end
+        round == extra_rounds && @info "Did not find less restricted solution."
     end
-
-    if extra_rounds > 0
-        @info "Successful rounds: $successful_rounds"
-    end
-
-    J = comp_indices(gavi,z,w)
-    K = random_K(J, rng)
 
     nv = length(decision_inds)
     reducible_inds = nv+1:n
     (; piece, reduced_inds) = local_piece(gavi,n,m,K; reducible_inds)
+    nr = setdiff(1:n, reduced_inds)
+    @infiltrate [z[nr]; w] ∉ piece
     if permute 
         permute!(piece, decision_inds, param_inds)
     end
@@ -251,6 +240,24 @@ function random_K(J, rng)
         K[8] = Set(J[12])
     end
     K
+end
+
+
+"""
+Finds piece that has maximal primal freedom, i.e. 
+l1 < z1 < u1
+l2 < Az+Bw < u2
+"""
+function max_freedom_K(J)
+    K1 = J[1]
+    K2 = J[2]∪ J[3] ∪ J[4]
+    K3 = J[5]
+    K4 = J[6]
+    K5 = J[7]
+    K6 = J[8] ∪ J[9] ∪ J[10]
+    K7 = J[11]
+    K8 = J[12]
+    K = Dict(1=>K1, 2=>K2, 3=>K3, 4=>K4, 5=>K5, 6=>K6, 7=>K7, 8=>K8)
 end
 
 function all_Ks(J)
@@ -473,7 +480,7 @@ K[6] : z = 0, l ≤ Az+Bw ≤ u
 K[7] : z ≤ 0, Az+Bw = u
 K[8] : z free, l = Az+Bw = u
 """
-function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}())
+function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}(), debug=nothing)
     d1 = length(gavi.l1)
     d2 = length(gavi.l2)
     I1 = [sparse(I,d1,d1) spzeros(d1,d2)]
@@ -488,21 +495,20 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}())
     zero_reduced = []
     bounds = mapreduce(vcat, 1:n) do i
         if i ∈ K[1]
-            i ∈ reducible_inds && push!(lo_reduced, i)
+            #i ∈ reducible_inds && push!(lo_reduced, i)
             [-gavi.o[i] Inf gavi.l1[i] gavi.l1[i]]
         elseif i ∈ K[2]
             [-gavi.o[i] -gavi.o[i] gavi.l1[i] gavi.u1[i]] 
         elseif i ∈ K[3]
-            i ∈ reducible_inds && push!(up_reduced, i)
+            #i ∈ reducible_inds && push!(up_reduced, i)
             [-Inf -gavi.o[i] gavi.u1[i] gavi.u1[i]]
         elseif i ∈ K[4]
-            i ∈ reducible_inds && push!(lo_reduced, i)
+            #i ∈ reducible_inds && push!(lo_reduced, i)
             [-Inf Inf gavi.l1[i] gavi.u1[i]]
         elseif i ∈ K[5]
-            #TODO CHECK INDEX OF THESE
             [0 Inf gavi.l2[i-d1] gavi.l2[i-d1]]
         elseif i ∈ K[6]
-            i ∈ reducible_inds && push!(zero_reduced, i)
+            #i ∈ reducible_inds && push!(zero_reduced, i)
             [0.0 0 gavi.l2[i-d1] gavi.u2[i-d1]]
         elseif i ∈ K[7]
             [-Inf 0 gavi.u2[i-d1] gavi.u2[i-d1]]
@@ -516,18 +522,52 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}())
     u = [bounds[:,2]; bounds[:,4]]
     noisy_inds = l.>u
     l[noisy_inds] = u[noisy_inds]
-
-    reduced_inds = [lo_reduced; up_reduced; zero_reduced]
-    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
-    Al = A[:,lo_reduced]
-    Au = A[:,up_reduced]
-    A = A[:,notreduced_inds]
-
-    reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4] # zero_reduced inds don't contribute
-    l -= reduced_contributions
-    u -= reduced_contributions
-   
     droptol!(A, 1e-8)
+   
+    reduced_vals = Dict{Int, Float64}()
+    
+    while true
+        further_reduced = false
+        for i in 1:size(A,1)
+            J = A[i,:].nzind
+            reduced_inds = keys(reduced_vals)
+            already_reduced = J ∩ reduced_inds
+            notyet_reduced = setdiff(J, reduced_inds)
+            J_reducible = notyet_reduced ∩ reducible_inds
+            if isapprox(l[i], u[i]; atol=1e-6) && length(J_reducible) == 1 && notyet_reduced == J_reducible
+                j = J_reducible[1]
+                @infiltrate !isnothing(debug) && j == 181
+                reduced_vals[j] = (u[i] - sum(A[i,k]*reduced_vals[k] for k in already_reduced; init=0.0)) / A[i,j]
+                further_reduced = true
+            end
+        end
+        if !further_reduced
+            break
+        end
+    end
+    if !isnothing(debug)
+        @infiltrate
+    end
+    
+    reduced_inds = keys(reduced_vals) |> collect
+    reduced_vals = values(reduced_vals) |> collect
+    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
+
+    r = A[:, reduced_inds]*reduced_vals
+    l -= r
+    u -= r
+    A = A[:, notreduced_inds]
+
+    #reduced_inds = [lo_reduced; up_reduced; zero_reduced]
+    #notreduced_inds = setdiff(1:size(A,2), reduced_inds)
+    #Al = A[:,lo_reduced]
+    #Au = A[:,up_reduced]
+    #A = A[:,notreduced_inds]
+
+    #reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4] # zero_reduced inds don't contribute
+    #l -= reduced_contributions
+    #u -= reduced_contributions
+
     meaningful = find_non_trivial(A,l,u, reduced_inds)
     (; piece = Poly(A[meaningful,:], l[meaningful], u[meaningful]), reduced_inds)
 end

@@ -314,7 +314,7 @@ function exemplar(poly::Poly; tol=1e-4, debug=false)
     @infiltrate debug
     t = -res.info.obj_val
     empty = abs(res.info.status_val) == 3 || t < tol
-    example = empty ? nothing : res.x
+    example = empty ? nothing : res.x[1:end-1]
     (; empty, example)
 end
 
@@ -429,7 +429,7 @@ function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6, debug=false)
                     verbose=false)
         res = OSQP.solve!(m)
         sv = abs(res.info.status_val)
-        @infiltrate (sv != 3 && sv != 1)
+        @infiltrate (sv ∉ (1,2,3))
         return abs(res.info.status_val) != 3
     end
 end
