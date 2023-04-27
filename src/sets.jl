@@ -13,15 +13,29 @@ function Base.adjoint(r::Relation)
 end
 
 """
-True iff x is lexico positive.
+returns (true iff x is lexico positive, magnitude of first non-zero value)
 """
 function lexico_positive(x::Vector{Float64})
-    return first(x) ≥ 0 
+    return (first(x) ≥ 0, abs(first(x)))
 end
 function lexico_positive(x::SparseVector{Float64, Int64})
     (I, V) = findnz(x)
     t = argmin(I)
-    return V[t] ≥ 0
+    return (V[t] ≥ 0, abs(V[t]))
+end
+
+function get_lexico_ordering(A)
+    order = []
+    for j = 1:size(A,2)
+        for i = 1:size(A,1)
+            a = A[i,:]
+            (I, V) = findnz(a)
+            if minimum(I) == j
+                push!(order, i)
+            end
+        end
+    end
+    order
 end
 
 """
@@ -29,7 +43,7 @@ A normalized slice.
 
 S := { x : l ⋈ₗ a'x ⋈ᵤ u }
 
-a ∈ ℝⁿ is required to be of unit norm and lexico-positive.
+a ∈ ℝⁿ is required to be lexico-positive and have 1.0 as the leading non-zero value.
 
 """
 struct Slice
@@ -43,8 +57,8 @@ struct Slice
         if (n ≤ tol)
             new(spzeros(length(a)), l, u, rl, ru)
         else
-            n = 1.0
-            if lexico_positive(a) || true
+            l_pos, n = lexico_positive(a)
+            if l_pos
                 new(sparse(a/n), l/n, u/n, rl, ru)
             else
                 new(sparse(-a/n), -u/n, -l/n, ru, rl)
@@ -86,6 +100,11 @@ Poly = {x : ∃ yᵢ, l ≤ a'x + b'yᵢ ≤ u for all slices, for all i ∈ sec
 #end
 Poly = Set{Slice}
 
+struct LabeledPoly
+    poly::Poly
+    labels
+end
+
 """
 Creates closed Poly from Matrix-Vector representation.
 """
@@ -113,6 +132,14 @@ function vectorize(p::Poly)
 end
 
 function simplify(p::Poly; tol=1e-6)
+    local implicilty_equality, vals
+    try
+        (implicitly_equality, vals) = implicit_bounds(p; tol, debug)
+        (A,l,u,rl,ru) = vectorize(p)
+        l[implicitly_equality] = u[implicitly_equality] = vals
+        p = Poly(A,l,u,rl,ru)
+    catch e
+    end
     Keep = Dict{SparseVector{Float64,Int64}, Tuple{Float64,Float64,Relation,Relation}}()
     for s in p
         exists = false
@@ -334,11 +361,11 @@ function implicit_bounds(poly::Poly; tol=1e-4, debug=false)
     n = length(poly)
     (A,l,u,rl,ru) = vectorize(poly)
     A = sparse(A)
-    implicit = fill(false, n)
+    implicitly_equality = fill(false, n)
     vals = fill(Inf, n)
     for i = n:-1:1
         if isapprox(l[i], u[i]; atol=tol)
-            implicit[i] = true
+            implicitly_equality[i] = true
             vals[i] = 0.5*(l[i] + u[i]) # trying to avoid tolerance issues
             continue
         else
@@ -377,28 +404,74 @@ function implicit_bounds(poly::Poly; tol=1e-4, debug=false)
             end
             @infiltrate debug
 
-            implicit[i] = isapprox(val_low, val_hi; atol=tol)
-            implicit[i] && (vals[i] = 0.5*(val_hi+val_low))
+            implicitly_equality[i] = isapprox(val_low, val_hi; atol=tol)
+            implicitly_equality[i] && (vals[i] = 0.5*(val_hi+val_low))
         end
     end
-    (; implicit, vals)
+    (; implicitly_equality, vals)
 end
 
 """
 Return the intrinsic dimension of the polyhedron.
 """
 function intrinsic_dim(p::Poly; tol=1e-4, debug=false)
-    local implicit, vals
+    local implicitly_equality, vals
     try
-        (; implicit, vals) = implicit_bounds(p; tol, debug)
+        (; implicitly_equality, vals) = implicit_bounds(p; tol, debug)
     catch e
-        return 0 # TODO this is a hack... assuming that primal inf check only fails if intrinsic dim is 0... probably not true
+        return 0 # TODO this is a hack... assuming that primal inf check only fails if intrinsic dim is 0... probably not the case
     end
     (A,l,u,rl,ru) = vectorize(p)
-    Aim = A[implicit,:]
+    Aim = A[implicitly_equality,:]
     @infiltrate debug
     intrinsic_dim = embedded_dim(p) - rank(Aim)
 end
+
+function eliminate_variables(p::Poly, indices)
+    elim_inds = indices
+    keep_inds = setdiff(1:embedded_dim(p), elim_inds)
+    if keep_inds == 1:embedded_dim(p)
+        return p
+    end
+    local implicitly_equality, vals
+    try
+        (; implicitly_equality, vals) = implicit_bounds(p)
+    catch e
+        @warn "Error! $e"
+        return p
+    end
+    (A,l,u,rl,ru) = vectorize(p)
+
+    inequality = .!implicitly_equality
+
+    Ae_elim = A[implicitly_equality,elim_inds]
+    Ae_keep = A[implicitly_equality,keep_inds]
+    Ai_elim = A[inequality,elim_inds]
+    Ai_keep = A[inequality,keep_inds]
+
+    rhs = vals[implicitly_equality]
+
+    if rank(Ae_elim) < size(Ae_elim, 2)
+        @info "Not enough constraints to eliminate."
+        return p
+    else
+        # x2 = (Ae_elim)† * (rhs - Ae_keep * x1)
+        Ad = (Ae_elim'*Ae_elim)*Ae_elim'
+        P = (I - Ae_elim*Ad)
+        Ae = P*Ae_keep
+        be = P*rhs
+        Ai = Ai_keep - Ai_elim*Ad*Ae_keep
+        ci = Ai_elim*Ad*rhs
+        ui = u[inequality] - ci
+        li = l[inequality] - ci
+        return Poly([Ae;Ai], 
+                    [be;li], 
+                    [be;ui], 
+                    [rl[implicitly_equality]; rl[inequality]],
+                    [ru[implicitly_equality]; ru[inequality]])
+    end
+end
+    
 
 """
 Return true if x is an element of p. Assumes closed poly.

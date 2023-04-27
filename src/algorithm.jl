@@ -6,6 +6,7 @@ function solve(qpn::QPNet, x_init;
         start = time()
         qep = gather(qpn, level)
         (; x_opt, Sol) = solve_qep(qep, x_init; 
+                                   qpn.var_indices,
                                    level,
                                    qpn.options.debug, 
                                    qpn.options.high_dimension, 
@@ -48,6 +49,7 @@ function solve(qpn::QPNet, x_init;
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
                 res = solve_qep(qep, x, S_keep, sub_inds;
+                                qpn.var_indices,
                                 level,
                                 qpn.options.debug,
                                 qpn.options.high_dimension,
@@ -80,7 +82,7 @@ function solve(qpn::QPNet, x_init;
             end
 
             if !current_infeasible && !low_feasible
-                res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimension)
+                res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimension, qpn.var_indices)
                 diff = norm(x-res.x_opt)
                 qpn.options.debug && println("Diff :", diff)
                 x .= res.x_opt
@@ -91,7 +93,7 @@ function solve(qpn::QPNet, x_init;
             qpn.options.debug && display_debug(level, iters, x, sub_count, throw_count)
 
             if qpn.options.high_dimension 
-                if level == 1 && iters < qpn.options.high_dimension_max_iters || !all_same
+                if (level == 1 && iters < qpn.options.high_dimension_max_iters) || (level > 1 && !all_same)
                     continue
                 end
             else

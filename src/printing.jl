@@ -14,6 +14,90 @@ function display_debug(level, iter, x, num_low, num_tossed)
     Printf.format(stdout, format, x...)
 end
 
+function Base.show(io::IO, ::MIME"text/plain", lpoly::LabeledPoly)
+    poly = lpoly.poly
+    labels = lpoly.labels
+    indent=get(io, :indent, 0)
+    space = " "^indent
+    n = length(poly)
+    d = embedded_dim(poly)
+    @assert d == length(labels)
+    reverse_labels = Dict()
+    for (name, ind) in labels
+        reverse_labels[ind] = name
+    end
+    half = Int(ceil(n/2))
+    println(io, space*"Polyhedron in ℝ^", d, " with ", n, " constraints.")
+    if n ≤ 500 && d ≤ 500
+        (A,l,u,rl,ru) = vectorize(poly)
+        ordering = get_lexico_ordering(A)
+        A = A[ordering, :]
+        l = l[ordering]
+        u = u[ordering]
+        rl = rl[ordering]
+        ru = ru[ordering]
+
+        eq = isapprox.(l, u; atol=1e-6)
+        ineq = .!eq
+        A = [A[eq,:]; A[ineq,:]]
+        l = [l[eq]; l[ineq]]
+        u = [u[eq]; u[ineq]]
+        rl = [rl[eq]; rl[ineq]]
+        ru = [ru[eq]; ru[ineq]]
+        try
+            str = space*"           "
+            args = []
+            for j in 1:d
+                name = string(reverse_labels[j])
+                ln = length(name)
+                if ln == 0
+                    str *= "      "
+                elseif ln == 1
+                    str *= "   %1s  "
+                elseif ln == 2
+                    str *= " %s   "
+                elseif ln == 3
+                    str *= "  %3s "
+                elseif ln == 4
+                    str *= " %4s "
+                else
+                    throw(error())
+                end
+                push!(args, reverse_labels[j])
+            end
+            str *= "\n"
+            format = Printf.Format(str)
+            Printf.format(io, format, args...)
+        catch e
+            @warn "Variable name is too long, not printing lables"
+        end
+        for i = 1:n
+            str = space*"%5.2f %2s | "
+            args = [l[i], rl[i]]
+            for j in 1:d
+                if iszero(A[i,j])
+                    str *= "  ⋅   "
+                else
+                    str *= "%5.2f "
+                    push!(args, A[i,j])
+                end
+            end
+            if i == half
+                str *= "| x %2s %5.2f"
+            else
+                str *= "|   %2s %5.2f"
+            end
+            push!(args, ru[i])
+            push!(args, u[i])
+            str *= "\n"
+            format = Printf.Format(str)
+            Printf.format(io, format, args...)
+        end
+    end
+    
+
+end
+
 function Base.show(io::IO, ::MIME"text/plain", poly::Poly)
     indent=get(io, :indent, 0)
     space = " "^indent
@@ -21,7 +105,7 @@ function Base.show(io::IO, ::MIME"text/plain", poly::Poly)
     d = embedded_dim(poly)
     half = Int(ceil(n/2))
     println(io, space*"Polyhedron in ℝ^", d, " with ", n, " constraints.")
-    if n ≤ 100 && d ≤ 100
+    if n ≤ 500 && d ≤ 500
         (A,l,u,rl,ru) = vectorize(poly)
         for i = 1:n
             str = space*"%5.2f %2s | "

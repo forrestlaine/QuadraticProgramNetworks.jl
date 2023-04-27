@@ -51,6 +51,7 @@ function solve_avi(avi::AVI, z0, w)
                                                    silent=true, 
                                                    convergence_tolerance=1e-8, 
                                                    cumulative_iteration_limit=100000,
+                                                   restart_limits=5,
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
@@ -126,6 +127,7 @@ end
 Solve the Quadratic Equilibrium Problem.
 """
 function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
+                   var_indices=nothing,
                    level=0,
                    debug=false,
                    high_dimension=false,
@@ -275,9 +277,9 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
             (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
         end
-        @infiltrate [z;w] ∉ piece
         permute!(piece, decision_inds, param_inds)
-        #level == 3 && @infiltrate
+        piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece))
+        @infiltrate
         (; x_opt, Sol=[piece,])
     else
         if shared_variable_mode == MIN_NORM

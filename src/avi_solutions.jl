@@ -144,7 +144,6 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
     reducible_inds = nv+1:n
     (; piece, reduced_inds) = local_piece(gavi,n,m,K; reducible_inds)
     nr = setdiff(1:n, reduced_inds)
-    @infiltrate [z[nr]; w] ∉ piece
     if permute 
         permute!(piece, decision_inds, param_inds)
     end
@@ -536,7 +535,6 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}(), debug=no
             J_reducible = notyet_reduced ∩ reducible_inds
             if isapprox(l[i], u[i]; atol=1e-6) && length(J_reducible) == 1 && notyet_reduced == J_reducible
                 j = J_reducible[1]
-                @infiltrate !isnothing(debug) && j == 181
                 reduced_vals[j] = (u[i] - sum(A[i,k]*reduced_vals[k] for k in already_reduced; init=0.0)) / A[i,j]
                 further_reduced = true
             end
@@ -545,31 +543,37 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}(), debug=no
             break
         end
     end
-    if !isnothing(debug)
-        @infiltrate
-    end
     
     reduced_inds = keys(reduced_vals) |> collect
     reduced_vals = values(reduced_vals) |> collect
     notreduced_inds = setdiff(1:size(A,2), reduced_inds)
+    remaining_reducible = Set(notreduced_inds ∩ reducible_inds)
+    remaining_primary = setdiff(notreduced_inds, reducible_inds)
+
+    while true
+        changed = false
+        for j in remaining_reducible
+            con_list = A[:,j].nzind
+            if !all(A[i,:].nzind ∩ remaining_reducible == A[i,:].nzind for i in con_list)
+                @info "yup"
+                delete!(remaining_reducible, j)
+                changed = true
+            end
+        end
+        if length(remaining_reducible) == 0 || !changed
+            break
+        end
+    end
 
     r = A[:, reduced_inds]*reduced_vals
     l -= r
     u -= r
+    setdiff!(notreduced_inds, remaining_reducible)
+    union!(reduced_inds, remaining_reducible)
     A = A[:, notreduced_inds]
 
-    #reduced_inds = [lo_reduced; up_reduced; zero_reduced]
-    #notreduced_inds = setdiff(1:size(A,2), reduced_inds)
-    #Al = A[:,lo_reduced]
-    #Au = A[:,up_reduced]
-    #A = A[:,notreduced_inds]
-
-    #reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4] # zero_reduced inds don't contribute
-    #l -= reduced_contributions
-    #u -= reduced_contributions
-
     meaningful = find_non_trivial(A,l,u, reduced_inds)
-    (; piece = Poly(A[meaningful,:], l[meaningful], u[meaningful]), reduced_inds)
+    (; piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful])), reduced_inds)
 end
 
 """
