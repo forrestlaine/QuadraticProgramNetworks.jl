@@ -277,9 +277,15 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
             (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
         end
+	@infiltrate !([z;w] in piece)
+	xz_permuted = zeros(length(z)+length(w))
+	xz_permuted[decision_inds] = z[1:length(decision_inds)]
+	xz_permuted[param_inds] = w
+	xz_permuted[length(decision_inds)+length(param_inds)+1:end] = z[length(decision_inds)+1:end]
         permute!(piece, decision_inds, param_inds)
-        piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece))
-        @infiltrate
+	@infiltrate !(xz_permuted in piece)
+        piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
+	@infiltrate !(x_opt in piece)
         (; x_opt, Sol=[piece,])
     else
         if shared_variable_mode == MIN_NORM

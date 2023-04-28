@@ -427,7 +427,7 @@ function intrinsic_dim(p::Poly; tol=1e-4, debug=false)
     intrinsic_dim = embedded_dim(p) - rank(Aim)
 end
 
-function eliminate_variables(p::Poly, indices)
+function eliminate_variables(p::Poly, indices, xz)
     elim_inds = indices
     keep_inds = setdiff(1:embedded_dim(p), elim_inds)
     if keep_inds == 1:embedded_dim(p)
@@ -449,6 +449,9 @@ function eliminate_variables(p::Poly, indices)
     Ai_elim = A[inequality,elim_inds]
     Ai_keep = A[inequality,keep_inds]
 
+    xz_keep = xz[keep_inds]
+    xz_elim = xz[elim_inds]
+
     rhs = vals[implicitly_equality]
 
     if rank(Ae_elim) < size(Ae_elim, 2)
@@ -456,7 +459,7 @@ function eliminate_variables(p::Poly, indices)
         return p
     else
         # x2 = (Ae_elim)† * (rhs - Ae_keep * x1)
-        Ad = (Ae_elim'*Ae_elim)*Ae_elim'
+        Ad = (Ae_elim'*Ae_elim)\Matrix(Ae_elim') |> sparse
         P = (I - Ae_elim*Ad)
         Ae = P*Ae_keep
         be = P*rhs
@@ -464,6 +467,7 @@ function eliminate_variables(p::Poly, indices)
         ci = Ai_elim*Ad*rhs
         ui = u[inequality] - ci
         li = l[inequality] - ci
+
         return Poly([Ae;Ai], 
                     [be;li], 
                     [be;ui], 
