@@ -21,7 +21,7 @@ function Base.show(io::IO, ::MIME"text/plain", lpoly::LabeledPoly)
     space = " "^indent
     n = length(poly)
     d = embedded_dim(poly)
-    @assert d == length(labels)
+    @assert d ≥ length(labels)
     reverse_labels = Dict()
     for (name, ind) in labels
         reverse_labels[ind] = name
@@ -48,7 +48,12 @@ function Base.show(io::IO, ::MIME"text/plain", lpoly::LabeledPoly)
             str = space*"           "
             args = []
             for j in 1:d
-                name = string(reverse_labels[j])
+                if j in keys(reverse_labels)
+                    name = string(reverse_labels[j])
+                    push!(args, name)
+                else
+                    name = ""
+                end
                 ln = length(name)
                 if ln == 0
                     str *= "      "
@@ -63,12 +68,12 @@ function Base.show(io::IO, ::MIME"text/plain", lpoly::LabeledPoly)
                 else
                     throw(error())
                 end
-                push!(args, reverse_labels[j])
             end
             str *= "\n"
             format = Printf.Format(str)
             Printf.format(io, format, args...)
         catch e
+            @info e
             @warn "Variable name is too long, not printing lables"
         end
         for i = 1:n

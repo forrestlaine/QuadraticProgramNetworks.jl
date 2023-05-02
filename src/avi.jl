@@ -269,7 +269,8 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     if high_dimension
         extra_rounds = level==1 ? 0 : 5
         #level == 3 && @infiltrate
-        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
+        z_orig = z
+        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=level==4, permute=false, extra_rounds, level)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
         if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM
@@ -277,16 +278,18 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
             (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
         end
-	@infiltrate !([z;w] in piece)
-	xz_permuted = zeros(length(z)+length(w))
-	xz_permuted[decision_inds] = z[1:length(decision_inds)]
-	xz_permuted[param_inds] = w
-	xz_permuted[length(decision_inds)+length(param_inds)+1:end] = z[length(decision_inds)+1:end]
+	    @infiltrate !([z;w] in piece)
+	    xz_permuted = zeros(length(z)+length(w))
+	    xz_permuted[decision_inds] = z[1:length(decision_inds)]
+	    xz_permuted[param_inds] = w
+	    xz_permuted[length(decision_inds)+length(param_inds)+1:end] = z[length(decision_inds)+1:end]
         permute!(piece, decision_inds, param_inds)
-	@infiltrate !(xz_permuted in piece)
-        piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
-	@infiltrate !(x_opt in piece)
-        (; x_opt, Sol=[piece,])
+	    @infiltrate !(xz_permuted in piece)
+        reduced_piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
+	    @infiltrate !(x_opt in reduced_piece)
+        @infiltrate level ≥ 2
+        @infiltrate embedded_dim(reduced_piece) > length(x_opt)
+        (; x_opt, Sol=[reduced_piece,])
     else
         if shared_variable_mode == MIN_NORM
             @error "not implemented yet" 

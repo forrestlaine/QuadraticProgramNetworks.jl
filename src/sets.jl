@@ -30,8 +30,15 @@ function get_lexico_ordering(A)
         for i = 1:size(A,1)
             a = A[i,:]
             (I, V) = findnz(a)
+            if length(I) == 0 
+                if j == 1
+                    push!(order, i)
+                end
+                continue
+            end
             if minimum(I) == j
                 push!(order, i)
+                continue
             end
         end
     end
@@ -443,7 +450,6 @@ function eliminate_variables(p::Poly, indices, xz)
     (A,l,u,rl,ru) = vectorize(p)
 
     inequality = .!implicitly_equality
-
     Ae_elim = A[implicitly_equality,elim_inds]
     Ae_keep = A[implicitly_equality,keep_inds]
     Ai_elim = A[inequality,elim_inds]
@@ -454,26 +460,57 @@ function eliminate_variables(p::Poly, indices, xz)
 
     rhs = vals[implicitly_equality]
 
-    if rank(Ae_elim) < size(Ae_elim, 2)
-        @info "Not enough constraints to eliminate."
-        return p
-    else
-        # x2 = (Ae_elim)† * (rhs - Ae_keep * x1)
-        Ad = (Ae_elim'*Ae_elim)\Matrix(Ae_elim') |> sparse
-        P = (I - Ae_elim*Ad)
-        Ae = P*Ae_keep
-        be = P*rhs
-        Ai = Ai_keep - Ai_elim*Ad*Ae_keep
-        ci = Ai_elim*Ad*rhs
-        ui = u[inequality] - ci
-        li = l[inequality] - ci
+    F = qr(Ae_elim)
 
-        return Poly([Ae;Ai], 
-                    [be;li], 
-                    [be;ui], 
-                    [rl[implicitly_equality]; rl[inequality]],
-                    [ru[implicitly_equality]; ru[inequality]])
+    if rank(F) < size(Ae_elim, 2)
+        @warn "Not enough constraints to eliminate. rank is $(rank(Ae_elim)) and size is $(size(Ae_elim))"
+
+        qr_keep = []
+        offset = 0
+        for i = 1:size(Ae_elim, 2)
+            if i+offset > size(Ae_elim, 2)
+                break
+            end
+            if !iszero(F.R[i,i+offset])
+                push!(qr_keep, i)
+            else
+                offset += 1
+            end
+        end
+        new_elim_inds = elim_inds[F.pcol[qr_keep]]
+        new_keep_inds = [keep_inds; setdiff(elim_inds, new_elim_inds)]
+
+        @info "Can't eliminate following inds: $(setdiff(elim_inds, new_elim_inds))"
+        
+        keep_inds = new_keep_inds
+        elim_inds = new_elim_inds
+
+        Ae_elim = A[implicitly_equality,elim_inds]
+        Ae_keep = A[implicitly_equality,keep_inds]
+        Ai_elim = A[inequality,elim_inds]
+        Ai_keep = A[inequality,keep_inds]
+
+        xz_keep = xz[keep_inds]
+        xz_elim = xz[elim_inds]
+
+        @assert rank(Ae_elim) == size(Ae_elim, 2)
+
     end
+    # x2 = (Ae_elim)† * (rhs - Ae_keep * x1)
+    Ad = (Ae_elim'*Ae_elim)\Matrix(Ae_elim') |> sparse
+    P = (I - Ae_elim*Ad)
+    Ae = P*Ae_keep
+    be = P*rhs
+    Ai = Ai_keep - Ai_elim*Ad*Ae_keep
+    ci = Ai_elim*Ad*rhs
+    ui = u[inequality] - ci
+    li = l[inequality] - ci
+
+    return Poly([Ae;Ai], 
+                [be;li], 
+                [be;ui], 
+                [rl[implicitly_equality]; rl[inequality]],
+                [ru[implicitly_equality]; ru[inequality]])
 end
     
 
@@ -501,8 +538,8 @@ function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6, debug=false)
                     l=l-Ap*x[inds], 
                     u=u-Ap*x[inds], 
                     polish=true, 
-                    eps_abs=1e-8, 
-                    eps_rel=1e-8, 
+                    eps_abs=tol, 
+                    eps_rel=tol, 
                     verbose=false)
         res = OSQP.solve!(m)
         sv = abs(res.info.status_val)

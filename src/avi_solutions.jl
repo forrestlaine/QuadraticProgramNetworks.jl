@@ -555,7 +555,6 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}(), debug=no
         for j in remaining_reducible
             con_list = A[:,j].nzind
             if !all(A[i,:].nzind ∩ remaining_reducible == A[i,:].nzind for i in con_list)
-                @info "yup"
                 delete!(remaining_reducible, j)
                 changed = true
             end

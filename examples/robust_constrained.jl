@@ -175,9 +175,9 @@ function setup(; T=5,
     # (max c s.t. c <= all other constraints)
     min_cons = []
     for t = 1:T
-        for lane_hs in lane_halfspaces
-            push!(min_cons, (lane_hs.a'*x[1:2,t] - lane_hs.b) - c)
-        end
+        #for lane_hs in lane_halfspaces
+        #    push!(min_cons, (lane_hs.a'*x[1:2,t] - lane_hs.b) - c)
+        #end
         for i in 1:num_obj
             push!(min_cons, s[i,t] - c)
         end
@@ -214,7 +214,7 @@ function setup(; T=5,
     append!(initial_state_cons, x̄[3:4])
     #lb = [-initial_box_length/2, -lane_width/2, initial_speed, 0.0]
     #ub = [initial_box_length/2, lane_width/2, initial_speed, 0.0]
-    lb = [0, 1.0, initial_speed, 0.0]
+    lb = [0, -1.0, initial_speed, 0.0]
     ub = [0, 1.0, initial_speed, 0.0]
     init_con_id = QPN.add_constraint!(qp_net, initial_state_cons, lb, ub)
 
@@ -250,15 +250,21 @@ function setup(; T=5,
     # Add player responsible for choosing control variables
     # to avoid worst-case obstacles, initial condition
 
-    cons = [c, ]
+    cons = []
+    for t = 1:T
+        for i = 1:num_obj
+            append!(cons, s[i,t])
+        end
+    end
     for t = 1:T
         append!(cons, u[:, t])
     end
-    lb = [0; fill(-max_accel, 2*T)]
-    ub = [Inf; fill(max_accel, 2*T)]
+    lb = [zeros(num_obj*T); fill(-max_accel, 2*T)]
+    ub = [fill(Inf, num_obj*T); fill(max_accel, 2*T)]
     con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
 
-    primary_cost = sum(-lane_dist_incentive * x[1:2, t]'*lane_vec for t = 1:T)
+    #primary_cost = sum(-lane_dist_incentive * x[1:2, t]'*lane_vec + 0.001*u[2,t]^2 for t = 1:T)
+    primary_cost = sum((u[1,t]-15)^2+u[2,t]^2 for t = 1:T)
     level = 1
     player_id = QPN.add_qp!(qp_net, level, primary_cost, [con_id,], u)
 
