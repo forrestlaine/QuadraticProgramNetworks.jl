@@ -1,3 +1,4 @@
 # QPN.jl
 
-Pre-release of QPNets, a package for solving general QP Networks. Accompanying paper and official release of package expected in mid-February, 2023. 
+A package for modeling Quadratic Program Networks (QPNs), and computing corresponding equilibrium points. 
+
