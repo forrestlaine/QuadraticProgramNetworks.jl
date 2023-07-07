@@ -34,6 +34,8 @@ function unpack(x; num_obj=2, T=5)
     X = []
     U = []
     O = []
+    X0 = x[id+1:id+4]
+    id += 4
     for t = 1:T
         xt = x[id+1:id+4]
         push!(X, xt)
@@ -44,8 +46,6 @@ function unpack(x; num_obj=2, T=5)
         push!(U, ut)
         id += 2
     end
-    X0 = x[id+1:id+4]
-    id += 4
     id += T*num_obj # skip s variables
     for i = 1:num_obj
         oi = x[id+1:id+2]
@@ -64,7 +64,7 @@ function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
     T = 0
     for k = 1:5
         try 
-            T = Int((N-5-k*2) / (k+6))
+            T = Int((N-6-k*2) / (k+6))
             num_obj = k
             break
         catch e

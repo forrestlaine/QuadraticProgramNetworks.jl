@@ -70,7 +70,7 @@ function get_next!(node::IntersectionNode, parent_poly, state)
         else
             node.resulting_poly = poly_intersect(node.contributing_poly, parent_poly)
         end
-        if isempty(node.resulting_poly)
+        if isempty(node.resulting_poly) || intrinsic_dim(node.resulting_poly) < node.level_dim
             node.empty = true
         end
     end

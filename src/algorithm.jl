@@ -25,7 +25,8 @@ function solve(qpn::QPNet, x_init;
 
         for iters in 1:qpn.options.max_iters
             ret_low = solve(qpn, x; level=level+1, rng)
-            x_low = ret_low.x_opt
+            #x_low = ret_low.x_opt
+            x = ret_low.x_opt
             Sol_low = ret_low.Sol
 
             set_guide!(Sol_low, fair_objective)
@@ -39,46 +40,66 @@ function solve(qpn::QPNet, x_init;
             current_infeasible = !all( x ∈ qep.constraints[i].poly for i in level_constraint_ids)
             sub_count = 0
             throw_count = 0
-            if qpn.options.debug && level+1 < num_levels(qpn)
-                println("About to reason about potentially ", 
-                        potential_length(Sol_low), " pieces (depth of ", depth(Sol_low), ").")
+            err_count = 0
+            if qpn.options.debug #&& level+1 < num_levels(qpn)
+                @info "Level $level information:"
+                feas = current_infeasible ? "infeasible" : "feasible"
+                @info "     Current guess is $(feas)."
+                @info "     Current fair value is $(current_fair_value)."
+                @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
+            @infiltrate
             local S_keep
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
-                res = solve_qep(qep, x, S_keep, sub_inds;
-                                qpn.var_indices,
-                                level,
-                                qpn.options.debug,
-                                qpn.options.high_dimension,
-                                qpn.options.shared_variable_mode,
-                                rng)
-                set_guide!(res.Sol, z->(z-x)'*(z-x))
-                new_fair_value = fair_objective(res.x_opt) # caution using fair_value
-                better_value_found = new_fair_value < current_fair_value - qpn.options.tol
-                same_value_found = new_fair_value < current_fair_value + qpn.options.tol
-                current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
-                if current_infeasible || better_value_found
-                    diff = norm(x-res.x_opt)
-                    qpn.options.debug && println("Better value found! $new_fair_value vs $current_fair_value")
-                    x .= res.x_opt
-                    all_same = false #TODO should queue all non-solutions?
-                    break
-                elseif current_agrees_with_piece || same_value_found
-                    # assumption here is that if solution has same value (for
-                    # fair objective(is this right for games?)) then valid
-                    # piece. Warning: These pieces may then be NON-LOCAL.
-                    # Needed for some problems (e.g. pessimistic
-                    # committment).
-                    push!(local_xs, res.x_opt)
-                    push!(local_solutions, res.Sol)
-                    push!(local_regions, S_keep)
-                else # poor-valued neighbor
-                    throw_count += 1
+                try
+                    res = solve_qep(qep, x, S_keep, sub_inds;
+                                    qpn.var_indices,
+                                    level,
+                                    qpn.options.debug,
+                                    qpn.options.high_dimension,
+                                    qpn.options.shared_variable_mode,
+                                    rng)
+                    set_guide!(res.Sol, z->(z-x)'*(z-x))
+                    new_fair_value = fair_objective(res.x_opt) # caution using fair_value
+                    better_value_found = new_fair_value < current_fair_value - qpn.options.tol
+                    same_value_found = new_fair_value < current_fair_value + qpn.options.tol
+                    current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
+                    if current_infeasible || better_value_found
+                        diff = norm(x-res.x_opt)
+                        if qpn.options.debug
+                            if current_infeasible
+                                @info "      Previously infeasible, but using piece, found feasible solution. Breaking."
+                            else
+                                @info "      Better value found ($new_fair_value vs $current_fair_value)! Breaking."
+                            end
+                        end
+                        x .= res.x_opt
+                        all_same = false #TODO should queue all non-solutions?
+                        break
+                    elseif current_agrees_with_piece || same_value_found
+                        # assumption here is that if solution has same value (for
+                        # fair objective(is this right for games?)) then valid
+                        # piece. Warning: These pieces may then be NON-LOCAL.
+                        # Needed for some problems (e.g. pessimistic
+                        # committment).
+                        push!(local_xs, res.x_opt)
+                        push!(local_solutions, res.Sol)
+                        push!(local_regions, S_keep)
+                    else # poor-valued neighbor
+                        throw_count += 1
+                        continue
+                    end
+                catch e
+                    err_count += 1
                     continue
                 end
+            end
+
+            if sub_count > 0 && err_count == sub_count
+                error("All subpieces infeasible")
             end
 
             if !current_infeasible && !low_feasible
@@ -119,14 +140,25 @@ S := ⋃ₚ ⋂ᵢ Zᵢᵖ
 Zᵢᵖ ∈ { Rᵢ', Sᵢ }
 where Rᵢ' is the set complement of Rᵢ.
 """
-function combine(regions, solutions, level_dim; show_progress=false)
+function combine(regions, solutions, level_dim; show_progress=true)
     if length(solutions) == 0
         @error "No solutions to combine... length solutions: 0, length regions: $(length(regions))"
     elseif length(solutions) == 1
-        first(solutions)
+        collect(first(solutions))
     else
+        @info "Forming complements"
         complements = map(complement, regions)
-        combined = [[collect(s); rc] for (rc, s) in zip(complements, solutions)]
+        @info "Forming combinations"
+        @infiltrate
+        it = 0
+        combined = map(zip(solutions, complements)) do (s, rc)
+            it += 1
+            @info it
+            [collect(s); rc]
+        end
+        #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
+        @info "Forming intersection"
         IntersectionRoot(combined, length.(complements), level_dim; show_progress)
+        #vcat([collect(s) for s in solutions]...)
     end
 end

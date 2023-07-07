@@ -65,15 +65,17 @@ mutable struct LocalGAVISolutions
     vertex_queue::PriorityQueue{Vertex, Float64}
     Ks::PriorityQueue{RecipeExemplar, Float64}
     explored_vertices::Set{Vertex}
+    max_vertices::Int
     explored_Ks::Set{PolyRecipe}
     polys::PriorityQueue{PolyExemplar, Float64}
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
-    LocalGAVISolutions(gavi::GAVI, z::Vector{Float64}, w::Vector{Float64}, decision_inds::Vector{Int}, param_inds::Vector{Int}) = begin
+    LocalGAVISolutions(gavi::GAVI, z::Vector{Float64}, w::Vector{Float64}, decision_inds::Vector{Int}, param_inds::Vector{Int}; max_vertices=typemax(Int)) = begin
         n = length(z)
         m = length(w)
         J = comp_indices(gavi,z,w)
         Ks = all_Ks(J)
+        @info "There are $(length(Ks)) immediately available pieces of this solution map."
         K = pop!(Ks)
         (; piece, exemplar, vertices) = expand(gavi,z,w,K,decision_inds,param_inds)
         polys = PriorityQueue{PolyExemplar, Float64}()
@@ -89,8 +91,16 @@ mutable struct LocalGAVISolutions
         explored_Ks = Set{PolyRecipe}((K,))
         explored_vertices = Set{Vertex}()
         guide = (x->Inf)
-        new(gavi, z, w, guide, vertex_queue, queued_Ks, explored_vertices, explored_Ks, polys, decision_inds, param_inds)
+        new(gavi, z, w, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds)
     end
+end
+
+function potential_length(ls::LocalGAVISolutions)
+    length(ls.Ks) + length(ls.explored_Ks)
+end
+
+function depth(ls::LocalGAVISolutions)
+    1
 end
  
 function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true, max_walk=1000.0, level=0)
@@ -333,7 +343,6 @@ function expand(gavi,z,w,K,decision_inds,param_inds; high_dim=false)
     #remaining_inds = setdiff(1:n, reduced_inds)
     #z = z[remaining_inds] 
     #n = length(z)
-
  
     (; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
     vertices = [ [v;w] for v in V]
@@ -341,7 +350,10 @@ function expand(gavi,z,w,K,decision_inds,param_inds; high_dim=false)
     lines = [ [l.a;zero(w)] for l in L]
     avg_vertex = sum(vertices) / length(vertices)
     exemplar = avg_vertex + sum(rays; init=zeros(n+m)) + sum(lines; init=zeros(n+m))
-    (; piece=project_and_permute(piece, decision_inds, param_inds), exemplar, vertices)
+    @infiltrate exemplar ∉ piece
+    piece = project_and_permute(piece, decision_inds, param_inds)
+
+    (; piece, exemplar, vertices)
 end
 
 function permute_eval(guide, v, decision_inds, param_inds)
@@ -394,6 +406,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
             vert = Vertex(v=v)
             if vert ∉ gavi_sols.explored_vertices
                 fval = permute_eval(gavi_sols.guide, v, gavi_sols.decision_inds, gavi_sols.param_inds)
+                #enqueue!(gavi_sols.vertex_queue, vert, fval)
                 gavi_sols.vertex_queue[vert] = fval
             end
         end
@@ -403,7 +416,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
         else
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
-    elseif !isempty(gavi_sols.vertex_queue) # No ready-to-process Poly recipes, need to pull from available vertices
+    elseif !isempty(gavi_sols.vertex_queue) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
         v = dequeue!(gavi_sols.vertex_queue)
         push!(gavi_sols.explored_vertices, v)
         J = comp_indices(gavi_sols.gavi, v.v[1:length(gavi_sols.z)], v.v[length(gavi_sols.z)+1:end])

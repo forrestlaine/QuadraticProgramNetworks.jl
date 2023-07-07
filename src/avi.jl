@@ -263,6 +263,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     (; z, status) = solve_gavi(gavi, z0, w)
     
     status != SUCCESS && @infiltrate
+    status != SUCCESS && @warn "AVI solve error!"
     status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
@@ -270,7 +271,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         extra_rounds = level==1 ? 0 : 5
         #level == 3 && @infiltrate
         z_orig = z
-        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=level==4, permute=false, extra_rounds, level)
+        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
         if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM
@@ -287,16 +288,16 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
 	    @infiltrate !(xz_permuted in piece)
         reduced_piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
 	    @infiltrate !(x_opt in reduced_piece)
-        @infiltrate level ≥ 2
         @infiltrate embedded_dim(reduced_piece) > length(x_opt)
         (; x_opt, Sol=[reduced_piece,])
     else
         if shared_variable_mode == MIN_NORM
             @error "not implemented yet" 
         elseif shared_variable_mode == SHARED_DUAL
+            @info "Found solution, now generating solution map (level $(level))"
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, decision_inds, param_inds) : nothing
+            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, decision_inds, param_inds; max_vertices = 0) : nothing
             (; x_opt, Sol)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."

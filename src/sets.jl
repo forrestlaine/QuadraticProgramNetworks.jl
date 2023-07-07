@@ -59,7 +59,8 @@ struct Slice
     u::Float64
     rl::Relation
     ru::Relation
-    Slice(a,l,u,rl,ru; tol=1e-6) = begin
+    Slice(a,l,u,rl,ru; tol=1e-8) = begin
+        droptol!(a, tol)
         n = norm(a)
         if (n ≤ tol)
             new(spzeros(length(a)), l, u, rl, ru)
@@ -434,7 +435,7 @@ function intrinsic_dim(p::Poly; tol=1e-4, debug=false)
     intrinsic_dim = embedded_dim(p) - rank(Aim)
 end
 
-function eliminate_variables(p::Poly, indices, xz)
+function eliminate_variables(p::Poly, indices, xz; debug=false)
     elim_inds = indices
     keep_inds = setdiff(1:embedded_dim(p), elim_inds)
     if keep_inds == 1:embedded_dim(p)
@@ -444,7 +445,7 @@ function eliminate_variables(p::Poly, indices, xz)
     try
         (; implicitly_equality, vals) = implicit_bounds(p)
     catch e
-        @warn "Error! $e"
+        @error e
         return p
     end
     (A,l,u,rl,ru) = vectorize(p)
@@ -505,6 +506,8 @@ function eliminate_variables(p::Poly, indices, xz)
     ci = Ai_elim*Ad*rhs
     ui = u[inequality] - ci
     li = l[inequality] - ci
+
+    @infiltrate debug
 
     return Poly([Ae;Ai], 
                 [be;li], 
