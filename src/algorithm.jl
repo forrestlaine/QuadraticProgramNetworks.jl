@@ -58,7 +58,7 @@ function solve(qpn::QPNet, x_init;
                     res = solve_qep(qep, x, S_keep, sub_inds;
                                     qpn.var_indices,
                                     level,
-                                    qpn.options.debug,
+                                   qpn.options.debug,
                                     qpn.options.high_dimension,
                                     qpn.options.shared_variable_mode,
                                     rng)
@@ -66,7 +66,7 @@ function solve(qpn::QPNet, x_init;
                     new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                     better_value_found = new_fair_value < current_fair_value - qpn.options.tol
                     same_value_found = new_fair_value < current_fair_value + qpn.options.tol
-                    current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
+
                     if current_infeasible || better_value_found
                         diff = norm(x-res.x_opt)
                         if qpn.options.debug
@@ -79,7 +79,16 @@ function solve(qpn::QPNet, x_init;
                         x .= res.x_opt
                         all_same = false #TODO should queue all non-solutions?
                         break
-                    elseif current_agrees_with_piece || same_value_found
+                    else
+                        @info "     Checking agreement."
+                        current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
+                        if current_agrees_with_piece
+                            @info "     Agrees."
+                        else
+                            @info "     Disagrees."
+                        end
+                    end
+                    if current_agrees_with_piece || same_value_found
                         # assumption here is that if solution has same value (for
                         # fair objective(is this right for games?)) then valid
                         # piece. Warning: These pieces may then be NON-LOCAL.
@@ -124,6 +133,7 @@ function solve(qpn::QPNet, x_init;
             end
 
             level_dim = length(param_indices(qpn, level))
+            @info "Combining pieces"
             S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=true) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
@@ -144,6 +154,7 @@ function combine(regions, solutions, level_dim; show_progress=true)
     if length(solutions) == 0
         @error "No solutions to combine... length solutions: 0, length regions: $(length(regions))"
     elseif length(solutions) == 1
+        @info "Length solutions is 1, collecting."
         collect(first(solutions))
     else
         @info "Forming complements"

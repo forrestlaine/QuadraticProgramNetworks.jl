@@ -345,9 +345,9 @@ function expand(gavi,z,w,K,decision_inds,param_inds; high_dim=false)
     #n = length(z)
  
     (; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
-    vertices = [ [v;w] for v in V]
-    rays = [ [r.a;zero(w)] for r in R]
-    lines = [ [l.a;zero(w)] for l in L]
+    vertices = [ [v; w] for v in V]
+    rays = [ [r.a; zero(w)] for r in R]
+    lines = [ [l.a; zero(w)] for l in L]
     avg_vertex = sum(vertices) / length(vertices)
     exemplar = avg_vertex + sum(rays; init=zeros(n+m)) + sum(lines; init=zeros(n+m))
     @infiltrate exemplar ∉ piece

@@ -29,7 +29,7 @@ function dyn(x, u; Δ = 0.1)
              u[1:2]]
 end
 
-function unpack(x; num_obj=2, T=5)
+function unpack(x; num_obj=2, T=5, num_obj_faces=4)
     id = 0
     X = []
     U = []
@@ -46,6 +46,7 @@ function unpack(x; num_obj=2, T=5)
         push!(U, ut)
         id += 2
     end
+    id += T*num_obj*num_obj_faces
     id += T*num_obj # skip s variables
     for i = 1:num_obj
         oi = x[id+1:id+2]
@@ -59,12 +60,11 @@ end
 function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
 
     N = length(x)
-    # N-5 = T*(num_obj+6) + num_obj*2
     num_obj = 0
     T = 0
     for k = 1:5
         try 
-            T = Int((N-6-k*2) / (k+6))
+            T = Int((N-6-k*2) / ((num_obj_faces+1)*k+6))
             num_obj = k
             break
         catch e
@@ -86,7 +86,7 @@ function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
 
 
 
-    vals = unpack(x; num_obj, T)
+    vals = unpack(x; num_obj, T, num_obj_faces)
 
     p = Circle(Point(vals.X0[1:2]...), 0.1f0)
     scatter!(ax, p, color=:green)
@@ -117,7 +117,7 @@ function setup(; T=5,
                  lane_width = 10.0,
                  initial_box_length = 6.0,
                  lane_dist_incentive = 10.0,
-                 max_accel = 15.0,
+                 max_accel = 10.0,
                  kwargs...)
 
     lane_vec = [cos(lane_heading), sin(lane_heading)]
@@ -127,10 +127,11 @@ function setup(; T=5,
     x̄ = QPN.variables(:x̄, 1:4)
     s = QPN.variables(:s, 1:num_obj, 1:T)
     o = QPN.variables(:o, 1:2, 1:num_obj)
+    h = QPN.variables(:h, 1:num_obj_faces, 1:num_obj, 1:T)
     c = QPN.variable(:c)
     v = QPN.variable(:v)
     
-    qp_net = QPNet(x̄,x,u,s,o,c,v)
+    qp_net = QPNet(x̄,x,u,h,s,o,c,v)
  
     objs = map(1:num_obj) do i
         verts = map(1:num_obj_faces) do j
@@ -140,7 +141,7 @@ function setup(; T=5,
         PolyObject(verts)
     end
     obstacle_distances_along = collect(1:num_obj) * obstacle_spacing .+ initial_box_length / 2
-    obstacle_offsets = [(-1)^i for i in 1:num_obj] .* lane_width/4.0
+    obstacle_offsets = [(-1)^i for i in 1:num_obj] .* lane_width/5.0
     
     obj_halfspaces = [halfspaces(obj) for obj in objs]
     right_laneline_normal = SVector(-sin(lane_heading), cos(lane_heading))
@@ -155,17 +156,20 @@ function setup(; T=5,
     for t = 1:T
         for i = 1:num_obj
             cost = s[i, t] # min s[t,i]
-            cons = map(1:num_obj_faces) do j
+            cons = mapreduce(vcat, 1:num_obj_faces) do j
                 hs = obj_halfspaces[i][j]
-                s[i, t] - (hs.a'*x[1:2,t] - hs.b)
+                [h[j, i, t] - (hs.a'*x[1:2,t] - hs.b),
+                 s[i, t] - h[j, i, t]]
             end
-            lb = fill(0.0, num_obj_faces)
-            ub = fill(Inf, num_obj_faces)
-    
+            lb = fill(0.0, 2*num_obj_faces)
+            ub = mapreduce(vcat, 1:num_obj_faces) do j
+                [0.0, Inf]
+            end
             con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
             
             level = 4
-            player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], s[i, t])
+            vars = [s[i, t]; [h[j, i, t] for j in 1:num_obj_faces]]
+            player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], vars...)
         end
     end
     
@@ -214,8 +218,8 @@ function setup(; T=5,
     append!(initial_state_cons, x̄[3:4])
     #lb = [-initial_box_length/2, -lane_width/2, initial_speed, 0.0]
     #ub = [initial_box_length/2, lane_width/2, initial_speed, 0.0]
-    lb = [0, -1.0, initial_speed, 0.0]
-    ub = [0, 1.0, initial_speed, 0.0]
+    lb = [0, 0.0, initial_speed, 0.0]
+    ub = [0, 0.0, initial_speed, 0.0]
     init_con_id = QPN.add_constraint!(qp_net, initial_state_cons, lb, ub)
 
     # Setup Obstacle Constraints
@@ -225,14 +229,15 @@ function setup(; T=5,
     for i in 1:num_obj
         append!(obstacle_cons, R\o[:,i])
         append!(lb, [obstacle_distances_along[i], obstacle_offsets[i]-lane_width/5])
-        append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/5])
+        #append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/5])
+        append!(ub, [obstacle_distances_along[i], -1.1])
     end
     obstacle_con_id = QPN.add_constraint!(qp_net, obstacle_cons, lb, ub)
 
     v_con_id = QPN.add_constraint!(qp_net, [v-c,], [0.0,], [Inf,])
 
     level = 2
-    cost = (v)^2
+    cost = 0.5*(v)^2
     player_id = QPN.add_qp!(qp_net, level, cost, [dyn_con_id, init_con_id, obstacle_con_id, v_con_id], x̄, x, o, v)
 
     #####################################################################
@@ -243,24 +248,25 @@ function setup(; T=5,
     #primary_cost = sum(lane_dist_incentive * x[1:2, t]'*lane_vec for t = 1:T)
     #level = 2
     #player_id = QPN.add_qp!(qp_net, level, primary_cost, Int[])
-
-     
+    
     #####################################################################
 
     # Add player responsible for choosing control variables
     # to avoid worst-case obstacles, initial condition
 
-    cons = []
-    for t = 1:T
-        for i = 1:num_obj
-            append!(cons, s[i,t])
-        end
-    end
+    cons = [c,]
+    #for t = 1:T
+    #    for i = 1:num_obj
+    #        append!(cons, s[i,t])
+    #    end
+    #end
     for t = 1:T
         append!(cons, u[:, t])
     end
-    lb = [zeros(num_obj*T); fill(-max_accel, 2*T)]
-    ub = [fill(Inf, num_obj*T); fill(max_accel, 2*T)]
+    lb = [0.2; fill(-max_accel, 2*T)]
+    ub = [Inf; fill(max_accel, 2*T)]
+    #lb = [zeros(num_obj*T); fill(-max_accel, 2*T)]
+    #ub = [fill(Inf, num_obj*T); fill(max_accel, 2*T)]
     con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
 
     #primary_cost = sum(-lane_dist_incentive * x[1:2, t]'*lane_vec + 0.001*u[2,t]^2 for t = 1:T)

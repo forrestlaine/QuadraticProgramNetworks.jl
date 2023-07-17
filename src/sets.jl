@@ -242,7 +242,7 @@ Convert to Polyhedra.jl polyhedron object. #TODO should probably use this format
 
 NOTE assumes that p is a closed polyhedron. 
 """
-function get_Polyhedron(p::Poly; tol=1e-6)
+function get_Polyhedron_hrep(p::Poly; tol=1e-6)
     hrep_poly = mapreduce(∩, p) do s
         cons = []
         if isapprox(s.l, s.u; atol=tol)
@@ -266,7 +266,7 @@ Get vertices of poly.
 This is probably not efficient for most polys of large size and low implicit dimension.
 """
 function get_verts(p; tol=1e-6)
-    hrep = get_Polyhedron(p; tol)
+    hrep = get_Polyhedron_hrep(p; tol)
     vrep = Polyhedra.doubledescription(hrep)
     if length(vrep.points.points) == 0
         @infiltrate
@@ -278,10 +278,12 @@ end
 """
 Project the poly into lower embedded dimension.
 """
-function project(p::P, keep_dims; tol=1e-6) where P<:Union{Poly, Poly}
-    hrep = get_Polyhedron(simplify(p); tol)
+function project(p::Poly, keep_dims; tol=1e-6)
+    @info "Projecting poly of dim $(embedded_dim(p)) to dim $(length(keep_dims))"
+    hrep = get_Polyhedron_hrep(simplify(p); tol)
     vrep = Polyhedra.doubledescription(hrep)
     poly = Polyhedra.polyhedron(vrep)
+    @infiltrate
     projected = Polyhedra.project(poly, keep_dims)
     local hrep
     try
@@ -300,8 +302,9 @@ function project(p::P, keep_dims; tol=1e-6) where P<:Union{Poly, Poly}
     A = sparse([AUi[:,1:end-1]; AUe[:,1:end-1]])
     l = Vector{Float64}([fill(-Inf, ni); AUe[:,end]])
     u = Vector{Float64}([AUi[:,end]; AUe[:,end]])
-    P(A,l,u) 
+    Poly(A,l,u) 
 end
+
 
 """
 Slice the poly given the specified values. 

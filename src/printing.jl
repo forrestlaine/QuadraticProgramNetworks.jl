@@ -50,6 +50,10 @@ function Base.show(io::IO, ::MIME"text/plain", lpoly::LabeledPoly)
             for j in 1:d
                 if j in keys(reverse_labels)
                     name = string(reverse_labels[j])
+                    if length(name) > 4
+                        inds = collect(eachindex(name))
+                        name = name[inds[1:4]]
+                    end
                     push!(args, name)
                 else
                     name = ""

@@ -297,7 +297,8 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             @info "Found solution, now generating solution map (level $(level))"
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, decision_inds, param_inds; max_vertices = 0) : nothing
+            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, decision_inds, param_inds; max_vertices = 1) : nothing
+            @info "Solution map generated."
             (; x_opt, Sol)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."
