@@ -58,7 +58,8 @@ function solve(qpn::QPNet, x_init;
                     res = solve_qep(qep, x, S_keep, sub_inds;
                                     qpn.var_indices,
                                     level,
-                                   qpn.options.debug,
+                                    subpiece_index=e,
+                                    qpn.options.debug,
                                     qpn.options.high_dimension,
                                     qpn.options.shared_variable_mode,
                                     rng)

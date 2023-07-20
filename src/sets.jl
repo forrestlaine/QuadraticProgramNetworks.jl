@@ -45,6 +45,18 @@ function get_lexico_ordering(A)
     order
 end
 
+
+"""
+A label which can be used to identify where halfspace constraints were introduced
+in the QPN.
+"""
+struct HalfspaceLabel
+    level::Int
+    subpiece_index::Int
+    comp_index::Int
+    bound_index::Int
+end
+
 """
 A normalized slice.
 
@@ -59,21 +71,24 @@ struct Slice
     u::Float64
     rl::Relation
     ru::Relation
-    Slice(a,l,u,rl,ru; tol=1e-8) = begin
+    il::Set{HalfspaceLabel}
+    iu::Set{HalfspaceLabel}
+    Slice(a,l,u,rl::Relation,ru::Relation,il=Set{HalfspaceLabel}(),iu=Set{HalfspaceLabel}(); tol=1e-8) = begin
         droptol!(a, tol)
         n = norm(a)
         if (n ≤ tol)
-            new(spzeros(length(a)), l, u, rl, ru)
+            new(spzeros(length(a)), l, u, rl, ru, il, iu)
         else
             l_pos, n = lexico_positive(a)
             if l_pos
-                new(sparse(a/n), l/n, u/n, rl, ru)
+                new(sparse(a/n), l/n, u/n, rl, ru, il, iu)
             else
-                new(sparse(-a/n), -u/n, -l/n, ru, rl)
+                new(sparse(-a/n), -u/n, -l/n, ru, rl, il, iu)
             end
         end
     end
     Slice(a,l,u) = Slice(a,l,u,≤,≤)
+    Slice(a,l,u,il::Set{HalfspaceLabel},iu::Set{HalfspaceLabel}) = Slice(a,l,u,≤,≤,il,iu)
 end
 
 """
@@ -106,7 +121,20 @@ Poly = {x : ∃ yᵢ, l ≤ a'x + b'yᵢ ≤ u for all slices, for all i ∈ sec
 #struct Poly
 #    main::Set{Slice}
 #end
-Poly = Set{Slice}
+abstract type Poly end
+
+struct BasicPoly <: Poly
+    poly::Set{Slice}
+end
+
+struct ProjectedPoly <: Poly
+    poly::BasicPoly
+    parent::Poly
+end
+
+struct IntersectionPoly <: Poly
+    polys::Vector{Poly}
+end
 
 struct LabeledPoly
     poly::Poly
@@ -116,13 +144,62 @@ end
 """
 Creates closed Poly from Matrix-Vector representation.
 """
-function Set{Slice}(A,l,u)
+function Poly(A,l,u)
     @assert length(l) == length(u) == size(A,1)
-    Poly(Slice(A[i,:], l[i], u[i]) for i in 1:length(l)) 
+    BasicPoly(Set(Slice(A[i,:], l[i], u[i]) for i in 1:length(l)))
 end
-function Set{Slice}(A,l,u,rl,ru)
+function Poly(A,l,u,rl::Vector{Relation},ru::Vector{Relation})
     @assert length(l) == length(u) == size(A,1) == length(rl) == length(ru)
-    Poly(Slice(A[i,:], l[i], u[i],rl[i], ru[i]) for i in 1:length(l)) 
+    BasicPoly(Set(Slice(A[i,:], l[i], u[i], rl[i], ru[i]) for i in 1:length(l)))
+end
+function Poly(A,l,u,il::Vector{Set{HalfspaceLabel}},iu::Vector{Set{HalfspaceLabel}})
+    @assert length(l) == length(u) == size(A,1) == length(il) == length(iu)
+    BasicPoly(Set(Slice(A[i,:], l[i], u[i], il[i], iu[i]) for i in 1:length(l)))
+end
+function Poly(S)
+    BasicPoly(Set(S))
+end
+
+function Base.eltype(poly::Poly)
+    Slice
+end
+function Base.IteratorSize(poly::Poly)
+    Base.HasLength()
+end
+
+function Base.length(poly::Union{BasicPoly,ProjectedPoly})
+    length(poly.poly)
+end
+function Base.length(poly::IntersectionPoly)
+    sum(length(p) for p in poly.polys)
+end
+function Base.iterate(poly::Union{BasicPoly,ProjectedPoly})
+    iterate(poly.poly)
+end
+function Base.iterate(poly::Union{BasicPoly,ProjectedPoly}, state)
+    iterate(poly.poly, state)
+end
+function Base.iterate(poly::IntersectionPoly)
+    if length(poly.polys) == 0
+        return nothing
+    else
+        iterate(poly, (; current=1, inner_state=nothing) )
+    end
+end
+function Base.iterate(poly::IntersectionPoly, state)
+    if state.current > length(poly.polys)
+        return nothing
+    end
+    if isnothing(state.inner_state)
+        ret = iterate(poly.polys[state.current])
+    else
+        ret = iterate(poly.polys[state.current], state.inner_state)
+    end
+    if isnothing(ret)
+        return iterate(poly, (; current=state.current+1, inner_state=nothing))
+    else
+        return (ret[1], (; current=state.current, inner_state=ret[2]))
+    end
 end
 
 """
@@ -136,18 +213,20 @@ function vectorize(p::Poly)
     u = reduce(vcat, ([s.u,] for s in p))
     rl = reduce(vcat, ([s.rl,] for s in p))
     ru = reduce(vcat, ([s.ru,] for s in p))
-    (A,l,u,rl,ru)
+    il = reduce(vcat, ([s.il,] for s in p))
+    iu = reduce(vcat, ([s.iu,] for s in p))
+    (;A,l,u,rl,ru,il,iu)
 end
 
-function simplify(p::Poly; tol=1e-6)
-    local implicilty_equality, vals
-    try
-        (implicitly_equality, vals) = implicit_bounds(p; tol, debug)
-        (A,l,u,rl,ru) = vectorize(p)
-        l[implicitly_equality] = u[implicitly_equality] = vals
-        p = Poly(A,l,u,rl,ru)
-    catch e
-    end
+function simplify(p::BasicPoly; tol=1e-6)
+    #try
+    #    #local implicilty_equality, vals
+    #    (implicitly_equality, vals) = implicit_bounds(p; tol, debug)
+    #    (;A,l,u,rl,ru,il,iu) = vectorize(p)
+    #    l[implicitly_equality] = u[implicitly_equality] = vals
+    #    p = Poly(A,l,u,rl,ru,il,iu)
+    #catch e
+    #end
     Keep = Dict{SparseVector{Float64,Int64}, Tuple{Float64,Float64,Relation,Relation}}()
     for s in p
         exists = false
@@ -156,30 +235,36 @@ function simplify(p::Poly; tol=1e-6)
                 if v[1] > s.l + tol
                     l = v[1]
                     rl = v[3]
+                    il = v[5]
                 elseif s.l > v[1] + tol
                     l = s.l
                     rl = s.rl
+                    il = s.il
                 else
                     l = 0.5*(v[1]+s.l)
                     rl = (v[3] == <) ? (<) : s.rl
+                    il = s.il ∪ v[5]
                 end
                 if v[2] < s.u - tol
                     u = v[2]
                     ru = v[4]
+                    iu = v[6]
                 elseif s.u < v[2] - tol
                     u = s.u
                     ru = s.ru
+                    iu = s.iu
                 else
                     u = 0.5*(v[2]+s.u)
                     ru = (v[4] == <) ? (<) : s.ru
+                    iu = s.iu ∪ v[6]
                 end
-                Keep[k] = (l,u,rl,ru)
+                Keep[k] = (l,u,rl,ru,il,iu)
                 exists = true
                 break
             end
         end
         if !exists && norm(s.a) > tol
-            Keep[s.a] = (s.l, s.u, s.rl, s.ru)
+            Keep[s.a] = (s.l, s.u, s.rl, s.ru, s.il, s.iu)
         end
     end
     Poly(Slice(k, v...) for (k,v) in Keep)
@@ -233,8 +318,17 @@ end
 """
 Form the closure of the polyhedron.
 """
-function closure(p::Poly)
-    Poly(closure(s) for s in p)
+#function closure(p::Poly)
+#    Poly(closure(s) for s in p)
+#end
+function closure(p::BasicPoly)
+    BasicPoly(Set(closure(s) for s in p))
+end
+function closure(p::ProjectedPoly)
+    ProjectedPoly(BasicPoly(Set(closure(s) for s in p)), p.parent)
+end
+function closure(p::IntersectionPoly)
+    IntersectionPoly([closure(sub_p) for sub_p in p.polys])
 end
 
 """
@@ -243,21 +337,28 @@ Convert to Polyhedra.jl polyhedron object. #TODO should probably use this format
 NOTE assumes that p is a closed polyhedron. 
 """
 function get_Polyhedron_hrep(p::Poly; tol=1e-6)
-    hrep_poly = mapreduce(∩, p) do s
+
+    hp_labels = []
+    hs_labels = []
+
+    hrep_poly = mapfoldl(∩, p) do s
         cons = []
         if isapprox(s.l, s.u; atol=tol)
             push!(cons, Polyhedra.HyperPlane(s.a, s.u))
+            push!(hp_labels, union(s.iu, s.il))
         else
             if !isinf(s.l)
                 push!(cons, Polyhedra.HalfSpace(-s.a, -s.l))
+                push!(hs_labels, s.il)
             end
             if !isinf(s.u)
                 push!(cons, Polyhedra.HalfSpace(s.a, s.u))
+                push!(hs_labels, s.iu)
             end
         end
-        reduce(∩, cons)
+        foldl(∩, cons)
     end
-    #Polyhedra.polyhedron(hrep_poly)
+    hrep_poly, hp_labels, hs_labels
 end
 
 """
@@ -266,7 +367,7 @@ Get vertices of poly.
 This is probably not efficient for most polys of large size and low implicit dimension.
 """
 function get_verts(p; tol=1e-6)
-    hrep = get_Polyhedron_hrep(p; tol)
+    hrep, _, _ = get_Polyhedron_hrep(p; tol)
     vrep = Polyhedra.doubledescription(hrep)
     if length(vrep.points.points) == 0
         @infiltrate
@@ -279,22 +380,91 @@ end
 Project the poly into lower embedded dimension.
 """
 function project(p::Poly, keep_dims; tol=1e-6)
-    @info "Projecting poly of dim $(embedded_dim(p)) to dim $(length(keep_dims))"
-    hrep = get_Polyhedron_hrep(simplify(p); tol)
-    vrep = Polyhedra.doubledescription(hrep)
-    poly = Polyhedra.polyhedron(vrep)
+    #@info "Projecting poly of dim $(embedded_dim(p)) to dim $(length(keep_dims))"
+    hr, hp_labels, hs_labels = get_Polyhedron_hrep(simplify(p); tol)
+    poly = Polyhedra.polyhedron(hr)
+    vr = vrep(poly)
+
     @infiltrate
-    projected = Polyhedra.project(poly, keep_dims)
-    local hrep
+
+    N = embedded_dim(p)
+
+    Pmat = sparse(I, N, N)
+    Pmat = Pmat[keep_dims, :]
+
+    point_idx_to_labels = Dict{Int, Set{HalfspaceLabel}}()
+    ray_idx_to_labels = Dict{Int, Set{HalfspaceLabel}}()
+    line_idx_to_labels = Dict{Int, Set{HalfspaceLabel}}()
+
+
+    for (fn_itr, label_map) in zip((points, rays, lines), (point_idx_to_labels, ray_idx_to_labels, line_idx_to_labels))
+        for vidx in eachindex(fn_itr(vr))
+            label_map[vidx.value] = mapreduce(union, zip((incidenthyperplaneindices, incidenthalfspaceindices), (hp_labels, hs_labels))) do (getter, labels)
+                mapreduce(union, getter(poly, vidx)) do hidx
+                    labels[hidx.value]
+                end
+            end
+        end
+    end
+    
+    projected_points::Vector{Vector{Float64}} = map(points(vr)) do point
+        Pmat*point
+    end
+    projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(rays(vr)) do ray
+        Pmat*ray
+    end
+    projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(lines(vr)) do line
+        Pmat*line
+    end
+
+    proj_vr = vrep(projected_points, projected_lines, projected_rays)
+    projected = polyhedron(proj_vr)
+    proj_hr = hrep(projected)
+
+    slices_ineq = map(halfspaces(proj_hr), eachindex(halfspaces(proj_hr))) do hs, idx
+        point_inds = incidentpointindices(projected, idx)
+        line_inds = incidentlineindices(projected, idx)
+        ray_inds = incidentrayindices(projected, idx)
+
+        labels_to_intersect = []
+        if !isempty(point_inds)
+            common_pt_labels = mapreduce(∩, point_inds) do ind
+                point_idx_to_labels[ind.value]
+            end
+            push!(labels_to_intersect, common_pt_labels)
+        end
+        if !isempty(ray_inds)
+            common_ray_inds = mapreduce(∩, ray_inds) do ind
+                    ray_idx_to_labels[ind.value]
+            end
+            push!(labels_to_intersect, common_ray_labels)
+        end
+        if !isempty(line_inds)
+            common_line_inds = mapreduce(∩, line_inds) do ind
+                    line_idx_to_labels[ind.value]
+            end
+            push!(labels_to_intersect, common_line_labels)
+        end
+
+        common_labels = isempty(labels_to_intersect) ? Set{HalfspaceLabel}() : reduce(∩, labels_to_intersect)
+        a = sparse(hs.a)
+        β = hs.β
+        @infiltrate
+        Slice(a, -Inf, β, ≤, ≤, Set{HalfspaceLabel}(), common_labels)
+    end
+
+    @infiltrate
+    
+    projected_old = Polyhedra.project(poly, keep_dims)
     try
-        hrep = Polyhedra.doubledescription(projected.vrep)
+        hr = hrep(projected)
     catch e 
         @infiltrate
     end
-    AUi = mapreduce(vcat, Polyhedra.halfspaces(hrep); init=zeros(0, length(keep_dims)+1)) do hs
+    AUi = mapreduce(vcat, Polyhedra.halfspaces(hr); init=zeros(0, length(keep_dims)+1)) do hs
         [hs.a' hs.β]
     end
-    AUe = mapreduce(vcat, Polyhedra.hyperplanes(hrep); init=zeros(0,length(keep_dims)+1)) do hp
+    AUe = mapreduce(vcat, Polyhedra.hyperplanes(hr); init=zeros(0,length(keep_dims)+1)) do hp
         [hp.a' hp.β]
     end
     ni = size(AUi,1)
@@ -328,7 +498,7 @@ function exemplar(poly::Poly; tol=1e-4, debug=false)
     m = OSQP.Model()
     n = length(poly)
     n == 0 && return (; empty=false, example=nothing)
-    (A,l,u,rl,ru) = vectorize(poly)
+    (; A,l,u,rl,ru) = vectorize(poly)
     d = size(A,2)
 
     AA = [[A; A] zeros(2n); zeros(1,d+1)]
@@ -370,7 +540,7 @@ Identify constraints which have implicitly equivalent upper and lower bounds.
 function implicit_bounds(poly::Poly; tol=1e-4, debug=false)
     m = OSQP.Model()
     n = length(poly)
-    (A,l,u,rl,ru) = vectorize(poly)
+    (; A,l,u,rl,ru) = vectorize(poly)
     A = sparse(A)
     implicitly_equality = fill(false, n)
     vals = fill(Inf, n)
@@ -432,13 +602,17 @@ function intrinsic_dim(p::Poly; tol=1e-4, debug=false)
     catch e
         return 0 # TODO this is a hack... assuming that primal inf check only fails if intrinsic dim is 0... probably not the case
     end
-    (A,l,u,rl,ru) = vectorize(p)
+    (; A,l,u,rl,ru) = vectorize(p)
     Aim = A[implicitly_equality,:]
     @infiltrate debug
     intrinsic_dim = embedded_dim(p) - rank(Aim)
 end
 
 function eliminate_variables(p::Poly, indices, xz; debug=false)
+
+    # TODO WARNING halfspace labels are deleted when using this method, need to
+    # fix
+
     elim_inds = indices
     keep_inds = setdiff(1:embedded_dim(p), elim_inds)
     if keep_inds == 1:embedded_dim(p)
@@ -451,7 +625,7 @@ function eliminate_variables(p::Poly, indices, xz; debug=false)
         @error e
         return p
     end
-    (A,l,u,rl,ru) = vectorize(p)
+    (; A,l,u,rl,ru) = vectorize(p)
 
     inequality = .!implicitly_equality
     Ae_elim = A[implicitly_equality,elim_inds]
@@ -530,7 +704,7 @@ function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6, debug=false)
     if n == d
         return all( in(x, S; tol) for S in p )
     else
-        (A,l,u,rl,ru) = vectorize(p)
+        (; A,l,u,rl,ru) = vectorize(p)
         inds = collect(1:n)
         uninds = collect(n+1:d)
         Ap = A[:, inds]
@@ -564,7 +738,7 @@ Intersect p with polys.
 function poly_intersect(p::Poly, ps::Poly...)
     d = embedded_dim(p)
     @assert all(embedded_dim(psi) == d for psi in ps)
-    union(p, ps...)
+    union(p, ps...) # this union is only because Poly is implemented as a Set of Slices
 end
 
 """

@@ -129,6 +129,7 @@ Solve the Quadratic Equilibrium Problem.
 function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
                    var_indices=nothing,
                    level=0,
+                   subpiece_index=0,
                    debug=false,
                    high_dimension=false,
                    gen_sol=true,
@@ -187,7 +188,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     As, A2s, Bs, ls, us = map(constraint_order) do id
         # TODO make sure that As / A2s accounts for auxiliary variables
         # properly (should be part of shared vars I think)
-        A,l,u,_,_ = vectorize(qep.constraints[id].poly)
+        (; A,l,u) = vectorize(qep.constraints[id].poly)
         local_aux_dim = size(A,2) - x_dim
         player_to_group_map = qep.constraints[id].group_mapping
         group_to_player_map = Dict{Int, Vector{Int}}()
@@ -271,7 +272,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         extra_rounds = level==1 ? 0 : 5
         #level == 3 && @infiltrate
         z_orig = z
-        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
+        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,level,subpiece_index,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
         if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM
@@ -297,7 +298,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             @info "Found solution, now generating solution map (level $(level))"
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, decision_inds, param_inds; max_vertices = 1) : nothing
+            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds; max_vertices = 0) : nothing
             @info "Solution map generated."
             (; x_opt, Sol)
         else
@@ -319,7 +320,11 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     # TODO refactor this to use solve_qep (need to call this function from
     # algorithm.jl)
 
-    (A, ll, uu, _, _) = vectorize(piece)
+    vec = vectorize(piece)
+    A = vec.A
+    ll = vec.l
+    uu = vec.u
+
     (m,n) = size(A)
 
     nz = length(zr)
@@ -347,7 +352,7 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     end
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
-    (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, decision_inds, param_inds, rng; permute=false)
+    (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, param_inds, rng; permute=false)
     (; piece, x_opt, z_revised=z)
 end
 

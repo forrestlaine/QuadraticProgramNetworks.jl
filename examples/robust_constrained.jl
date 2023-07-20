@@ -229,8 +229,8 @@ function setup(; T=5,
     for i in 1:num_obj
         append!(obstacle_cons, R\o[:,i])
         append!(lb, [obstacle_distances_along[i], obstacle_offsets[i]-lane_width/5])
-        #append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/5])
-        append!(ub, [obstacle_distances_along[i], -1.1])
+        append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/5])
+        #append!(ub, [obstacle_distances_along[i], 0.0])
     end
     obstacle_con_id = QPN.add_constraint!(qp_net, obstacle_cons, lb, ub)
 
@@ -263,7 +263,7 @@ function setup(; T=5,
     for t = 1:T
         append!(cons, u[:, t])
     end
-    lb = [0.2; fill(-max_accel, 2*T)]
+    lb = [0.5; fill(-max_accel, 2*T)]
     ub = [Inf; fill(max_accel, 2*T)]
     #lb = [zeros(num_obj*T); fill(-max_accel, 2*T)]
     #ub = [fill(Inf, num_obj*T); fill(max_accel, 2*T)]

@@ -61,6 +61,8 @@ mutable struct LocalGAVISolutions
     gavi::GAVI
     z::Vector{Float64}
     w::Vector{Float64}
+    level::Int
+    subpiece_index::Int
     guide::Function
     vertex_queue::PriorityQueue{Vertex, Float64}
     Ks::PriorityQueue{RecipeExemplar, Float64}
@@ -70,14 +72,15 @@ mutable struct LocalGAVISolutions
     polys::PriorityQueue{PolyExemplar, Float64}
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
-    LocalGAVISolutions(gavi::GAVI, z::Vector{Float64}, w::Vector{Float64}, decision_inds::Vector{Int}, param_inds::Vector{Int}; max_vertices=typemax(Int)) = begin
+    LocalGAVISolutions(gavi::GAVI, z::Vector{Float64}, w::Vector{Float64}, level::Int, subpiece_index::Int, decision_inds::Vector{Int}, param_inds::Vector{Int}; max_vertices=typemax(Int)) = begin
         n = length(z)
         m = length(w)
         J = comp_indices(gavi,z,w)
         Ks = all_Ks(J)
         @info "There are $(length(Ks)) immediately available pieces of this solution map."
         K = pop!(Ks)
-        (; piece, exemplar, vertices) = expand(gavi,z,w,K,decision_inds,param_inds)
+        @infiltrate
+        (; piece, exemplar, vertices) = expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds)
         polys = PriorityQueue{PolyExemplar, Float64}()
         vertex_queue = PriorityQueue{Vertex, Float64}()
         enqueue!(polys, PolyExemplar(piece, exemplar), Inf)
@@ -91,7 +94,7 @@ mutable struct LocalGAVISolutions
         explored_Ks = Set{PolyRecipe}((K,))
         explored_vertices = Set{Vertex}()
         guide = (x->Inf)
-        new(gavi, z, w, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds)
+        new(gavi, z, w, level, subpiece_index, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds)
     end
 end
 
@@ -103,7 +106,7 @@ function depth(ls::LocalGAVISolutions)
     1
 end
  
-function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true, max_walk=1000.0, level=0)
+function get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, param_inds, rng; debug=false, extra_rounds=0, permute=true, max_walk=1000.0)
     n = length(z)
     dx = length(decision_inds) + length(param_inds)
     m = length(w)
@@ -119,8 +122,8 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
  
     for round in 1:extra_rounds
         q = randn(rng, n)
-        (; piece, reduced_inds) = local_piece(gavi,n,m,K)
-        (A,l,u,rl,ru) = vectorize(piece)
+        (; piece, reduced_inds) = local_piece(gavi,n,m,K,level,subpiece_index)
+        (; A,l,u,rl,ru) = vectorize(piece)
         Aw = A[:,n+1:end]*w
         modl = OSQP.Model()
         OSQP.setup!(modl; 
@@ -152,7 +155,7 @@ function get_single_solution(gavi, z, w, decision_inds, param_inds, rng; debug=f
 
     nv = length(decision_inds)
     reducible_inds = nv+1:n
-    (; piece, reduced_inds) = local_piece(gavi,n,m,K; reducible_inds)
+    (; piece, reduced_inds) = local_piece(gavi,n,m,K,level,subpiece_index;reducible_inds)
     nr = setdiff(1:n, reduced_inds)
     if permute 
         permute!(piece, decision_inds, param_inds)
@@ -330,7 +333,7 @@ end
 #
 #(; piece, x_opt=x, reduced_inds)
 
-function expand(gavi,z,w,K,decision_inds,param_inds; high_dim=false)
+function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_dim=false)
     n = length(z)
     m = length(w)
 
@@ -338,12 +341,13 @@ function expand(gavi,z,w,K,decision_inds,param_inds; high_dim=false)
     #reducible_inds = nv+1:n
     reducible_inds = []
     #(; piece, reduced_inds) = local_piece(gavi,n,m,K,decision_inds,param_inds; reducible_inds)
-    (; piece, reduced_inds) = local_piece(gavi,n,m,K; reducible_inds)
+    (; piece, reduced_inds) = local_piece(gavi,n,m,K,level,subpiece_index; reducible_inds)
+    
 
     #remaining_inds = setdiff(1:n, reduced_inds)
     #z = z[remaining_inds] 
     #n = length(z)
- 
+    #
     (; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
     vertices = [ [v; w] for v in V]
     rays = [ [r.a; zero(w)] for r in R]
@@ -351,6 +355,7 @@ function expand(gavi,z,w,K,decision_inds,param_inds; high_dim=false)
     avg_vertex = sum(vertices) / length(vertices)
     exemplar = avg_vertex + sum(rays; init=zeros(n+m)) + sum(lines; init=zeros(n+m))
     @infiltrate exemplar ∉ piece
+    
     piece = project_and_permute(piece, decision_inds, param_inds)
 
     (; piece, exemplar, vertices)
@@ -397,6 +402,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
     end
     # exploration mode (either continuing or starting)
     if !isempty(gavi_sols.Ks) # if recipes available, process
+        @info "Processing recipe. Length of queue: $(length(gavi_sols.Ks))." 
         K = dequeue!(gavi_sols.Ks)
         (; piece, exemplar, vertices) = expand(gavi_sols.gavi, gavi_sols.z, gavi_sols.w, K.recipe, gavi_sols.decision_inds, gavi_sols.param_inds)
         fval = permute_eval(gavi_sols.guide, exemplar, gavi_sols.decision_inds, gavi_sols.param_inds)
@@ -417,6 +423,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
     elseif !isempty(gavi_sols.vertex_queue) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
+        @info "Exploring vertex. Length of queue: $(length(gavi_sols.vertex_queue)). Num explored: $(length(gavi_sols.explored_vertices))"
         v = dequeue!(gavi_sols.vertex_queue)
         push!(gavi_sols.explored_vertices, v)
         J = comp_indices(gavi_sols.gavi, v.v[1:length(gavi_sols.z)], v.v[length(gavi_sols.z)+1:end])
@@ -492,7 +499,7 @@ K[6] : z = 0, l ≤ Az+Bw ≤ u
 K[7] : z ≤ 0, Az+Bw = u
 K[8] : z free, l = Az+Bw = u
 """
-function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}(), debug=nothing)
+function local_piece(gavi::GAVI, n, m, K, level, subpiece_index; reducible_inds=Vector{Int}(), debug=nothing)
     d1 = length(gavi.l1)
     d2 = length(gavi.l2)
     I1 = [sparse(I,d1,d1) spzeros(d1,d2)]
@@ -505,87 +512,111 @@ function local_piece(gavi::GAVI, n, m, K; reducible_inds=Vector{Int}(), debug=no
     lo_reduced = []
     up_reduced = []
     zero_reduced = []
-    bounds = mapreduce(vcat, 1:n) do i
+    bounds_and_labels = mapreduce(vcat, 1:n) do i
         if i ∈ K[1]
-            #i ∈ reducible_inds && push!(lo_reduced, i)
-            [-gavi.o[i] Inf gavi.l1[i] gavi.l1[i]]
+            [-gavi.o[i] Inf gavi.l1[i] gavi.l1[i] 0 0 0 1]
         elseif i ∈ K[2]
-            [-gavi.o[i] -gavi.o[i] gavi.l1[i] gavi.u1[i]] 
+            labels = [0 0 0 0]
+            if !isinf(gavi.u1[i])
+                labels[1] = 4 
+            end
+            if !isinf(gavi.l1[i])
+                labels[2] = 3 
+            end
+            [-gavi.o[i] -gavi.o[i] gavi.l1[i] gavi.u1[i] labels] 
         elseif i ∈ K[3]
-            #i ∈ reducible_inds && push!(up_reduced, i)
-            [-Inf -gavi.o[i] gavi.u1[i] gavi.u1[i]]
+            [-Inf -gavi.o[i] gavi.u1[i] gavi.u1[i] 0 0 2 0]
         elseif i ∈ K[4]
-            #i ∈ reducible_inds && push!(lo_reduced, i)
-            [-Inf Inf gavi.l1[i] gavi.u1[i]]
+            [-Inf Inf gavi.l1[i] gavi.u1[i] 0 0 0 0]
         elseif i ∈ K[5]
-            [0 Inf gavi.l2[i-d1] gavi.l2[i-d1]]
+            [0 Inf gavi.l2[i-d1] gavi.l2[i-d1] 0 0 0 1]
         elseif i ∈ K[6]
-            #i ∈ reducible_inds && push!(zero_reduced, i)
-            [0.0 0 gavi.l2[i-d1] gavi.u2[i-d1]]
+            labels = [0 0 0 0]
+            if !isinf(gavi.u2[i-d1])
+                labels[1] = 4 
+            end
+            if !isinf(gavi.l2[i-d1])
+                labels[2] = 3 
+            end
+            [0.0 0 gavi.l2[i-d1] gavi.u2[i-d1] labels]
         elseif i ∈ K[7]
-            [-Inf 0 gavi.u2[i-d1] gavi.u2[i-d1]]
+            [-Inf 0 gavi.u2[i-d1] gavi.u2[i-d1] 0 0 2 0]
         elseif i ∈ K[8]
-            [-Inf Inf gavi.l2[i-d1] gavi.u2[i-d1]]
+            [-Inf Inf gavi.l2[i-d1] gavi.u2[i-d1] 0 0 0 0]
         else
             @infiltrate
         end
     end
-    l = [bounds[:,1]; bounds[:,3]]
-    u = [bounds[:,2]; bounds[:,4]]
+    l = [bounds_and_labels[:,1]; bounds_and_labels[:,3]]
+    u = [bounds_and_labels[:,2]; bounds_and_labels[:,4]]
+
+    top_labels_l, top_labels_u, bottom_labels_l, bottom_labels_u = map(5:8) do j
+        map(1:n) do i
+            bounds_id = bounds_and_labels[i, j]
+            bounds_id == 0 ? Set{HalfspaceLabel}() : Set((HalfspaceLabel(level, subpiece_index, i, bounds_id),))
+        end
+    end
+    labels_l = [top_labels_l; bottom_labels_l]
+    labels_u = [top_labels_u; bottom_labels_u]
+
     noisy_inds = l.>u
     l[noisy_inds] = u[noisy_inds]
     droptol!(A, 1e-8)
    
     reduced_vals = Dict{Int, Float64}()
-    
-    while true
-        further_reduced = false
-        for i in 1:size(A,1)
-            J = A[i,:].nzind
-            reduced_inds = keys(reduced_vals)
-            already_reduced = J ∩ reduced_inds
-            notyet_reduced = setdiff(J, reduced_inds)
-            J_reducible = notyet_reduced ∩ reducible_inds
-            if isapprox(l[i], u[i]; atol=1e-6) && length(J_reducible) == 1 && notyet_reduced == J_reducible
-                j = J_reducible[1]
-                reduced_vals[j] = (u[i] - sum(A[i,k]*reduced_vals[k] for k in already_reduced; init=0.0)) / A[i,j]
-                further_reduced = true
+   
+    if length(reducible_inds) > 0
+        while true
+            further_reduced = false
+            for i in 1:size(A,1)
+                J = A[i,:].nzind
+                reduced_inds = keys(reduced_vals)
+                already_reduced = J ∩ reduced_inds
+                notyet_reduced = setdiff(J, reduced_inds)
+                J_reducible = notyet_reduced ∩ reducible_inds
+                if isapprox(l[i], u[i]; atol=1e-6) && length(J_reducible) == 1 && notyet_reduced == J_reducible
+                    j = J_reducible[1]
+                    reduced_vals[j] = (u[i] - sum(A[i,k]*reduced_vals[k] for k in already_reduced; init=0.0)) / A[i,j]
+                    further_reduced = true
+                end
+            end
+            if !further_reduced
+                break
             end
         end
-        if !further_reduced
-            break
-        end
-    end
     
-    reduced_inds = keys(reduced_vals) |> collect
-    reduced_vals = values(reduced_vals) |> collect
-    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
-    remaining_reducible = Set(notreduced_inds ∩ reducible_inds)
-    remaining_primary = setdiff(notreduced_inds, reducible_inds)
-
-    while true
-        changed = false
-        for j in remaining_reducible
-            con_list = A[:,j].nzind
-            if !all(A[i,:].nzind ∩ remaining_reducible == A[i,:].nzind for i in con_list)
-                delete!(remaining_reducible, j)
-                changed = true
+        reduced_inds = keys(reduced_vals) |> collect
+        reduced_vals = values(reduced_vals) |> collect
+        notreduced_inds = setdiff(1:size(A,2), reduced_inds)
+        remaining_reducible = Set(notreduced_inds ∩ reducible_inds)
+        remaining_primary = setdiff(notreduced_inds, reducible_inds)
+    
+        while true
+            changed = false
+            for j in remaining_reducible
+                con_list = A[:,j].nzind
+                if !all(A[i,:].nzind ∩ remaining_reducible == A[i,:].nzind for i in con_list)
+                    delete!(remaining_reducible, j)
+                    changed = true
+                end
+            end
+            if length(remaining_reducible) == 0 || !changed
+                break
             end
         end
-        if length(remaining_reducible) == 0 || !changed
-            break
-        end
+    
+        r = A[:, reduced_inds]*reduced_vals
+        l -= r
+        u -= r
+        setdiff!(notreduced_inds, remaining_reducible)
+        union!(reduced_inds, remaining_reducible)
+        A = A[:, notreduced_inds]
+    else
+        reduced_inds = []
     end
 
-    r = A[:, reduced_inds]*reduced_vals
-    l -= r
-    u -= r
-    setdiff!(notreduced_inds, remaining_reducible)
-    union!(reduced_inds, remaining_reducible)
-    A = A[:, notreduced_inds]
-
-    meaningful = find_non_trivial(A,l,u, reduced_inds)
-    (; piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful])), reduced_inds)
+    meaningful = find_non_trivial(A,l,u,reduced_inds)
+    (; piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful], labels_l[meaningful], labels_u[meaningful])), reduced_inds)
 end
 
 """

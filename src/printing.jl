@@ -29,7 +29,7 @@ function Base.show(io::IO, ::MIME"text/plain", lpoly::LabeledPoly)
     half = Int(ceil(n/2))
     println(io, space*"Polyhedron in ℝ^", d, " with ", n, " constraints.")
     if n ≤ 500 && d ≤ 500
-        (A,l,u,rl,ru) = vectorize(poly)
+        (;A,l,u,rl,ru) = vectorize(poly)
         ordering = get_lexico_ordering(A)
         A = A[ordering, :]
         l = l[ordering]
@@ -115,7 +115,7 @@ function Base.show(io::IO, ::MIME"text/plain", poly::Poly)
     half = Int(ceil(n/2))
     println(io, space*"Polyhedron in ℝ^", d, " with ", n, " constraints.")
     if n ≤ 500 && d ≤ 500
-        (A,l,u,rl,ru) = vectorize(poly)
+        (;A,l,u,rl,ru) = vectorize(poly)
         for i = 1:n
             str = space*"%5.2f %2s | "
             args = [l[i], rl[i]]
