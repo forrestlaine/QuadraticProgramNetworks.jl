@@ -87,6 +87,7 @@ end
 
 function get_flat_initialization(qpn::QPNet; x0 = zeros(length(qpn.variables)))
     qpn_flat = flatten(qpn)
+    qpn_flat.options.gen_solution_map = false
     ret = solve(qpn_flat, x0)
     ret.x_opt
 end

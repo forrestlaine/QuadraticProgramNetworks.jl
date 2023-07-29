@@ -31,15 +31,25 @@ function Base.hash(v::Vertex, h::UInt)
     hash(round.(v.v; digits=v.digits))
 end
 
-function permute!(P, var_inds, param_inds)
+
+"""
+Assumes P has slices defined in a space described per the following ordering
+[ var_vars | extra_vars | param_vars]
+
+After permuting, slices have var_vars at locations specifed by var_inds,
+param_vars are at locations specified by param_inds, and extra_vars
+occupy remaining locations.
+"""
+function permute!(P::Poly, var_inds, param_inds)
     d = embedded_dim(P)
     dv = length(var_inds)
     dp = length(param_inds)
+    extra_inds = setdiff(1:d, [var_inds ; param_inds])
     for slice in P
         a = similar(slice.a)
         a[var_inds] = slice.a[1:dv]
         a[param_inds] = slice.a[d-dp+1:d]
-        a[dv+dp+1:end] = slice.a[dv+1:d-dp]
+        a[extra_inds] = slice.a[dv+1:d-dp]
         slice.a .= a
         dropzeros!(slice.a)
     end
@@ -77,9 +87,8 @@ mutable struct LocalGAVISolutions
         m = length(w)
         J = comp_indices(gavi,z,w)
         Ks = all_Ks(J)
-        @info "There are $(length(Ks)) immediately available pieces of this solution map."
+        @debug "There are $(length(Ks)) immediately available pieces of this solution map."
         K = pop!(Ks)
-        @infiltrate
         (; piece, exemplar, vertices) = expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds)
         polys = PriorityQueue{PolyExemplar, Float64}()
         vertex_queue = PriorityQueue{Vertex, Float64}()
@@ -167,53 +176,6 @@ function get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, p
 
     (; piece, x_opt=x, reduced_inds, z)
 end
-
-
-#"""
-#    [B1 B2][x; y] = b
-#l ≤ [C1 C2][x; y] ≤ u
-#
-#size(B2) = m × n
-#if m ≥ n && rank(B2) == m
-#    y can be eliminated trivially
-#if m ≥ n && m > rank(B2) ≥ n
-#    y can be partially eliminated trivially (I THINK)
-#if m < n
-#    need to think this through...
-#
-#"""
-#function partial_project(piece, dx; tol=1e-4, sval_tol=1e-6, sp_tol=1e-8)
-#    (A,l,u,_,_) = vectorize(piece)
-#    eq_inds = collect(1:length(l))[isapprox.(l, u; atol=tol)]
-#    iq_inds = setdiff(1:length(l), eq_inds) |> sort
-#    Ae = A[eq_inds,:]
-#    Ai = A[iq_inds,:]
-#    b = u[eq_inds]
-#    A1 = Ae[:,1:dx]
-#    A2 = Ae[:,dx+1:end]
-#    r = rank(A2)
-#    if r == size(A2,2) # linearly independent columns
-#        Atmp = A2'A2
-#        pinv = mapreduce(hcat, eachrow(A2)) do a
-#            sparse(Atmp \ collect(a))
-#        end
-#        resid = A2*pinv - I
-#        droptol!(resid, sp_tol)
-#        A_eq_new = resid * A1
-#        b_eq_new = resid * b
-#
-#        A_ineq_new = Ai[:,1:dx] - Ai[:,dx+1:end] * pinv*A1
-#        tmp = Ai[:,dx+1:end]*pinv*b
-#        u_ineq_new = u[iq_inds]-tmp
-#        l_ineq_new = l[iq_inds]-tmp
-#        p = Poly([A_eq_new; A_ineq_new], [b_eq_new; l_ineq_new], [b_eq_new; u_ineq_new])
-#        @infiltrate
-#        return p
-#    else
-#        @infiltrate
-#        return piece
-#    end
-#end
 
 """
 K[1] : J1 ∪ J2a
@@ -311,7 +273,7 @@ function set_guide!(gavi_sols::LocalGAVISolutions, guide)
         gavi_sols.Ks[K] = permute_eval(guide, K.ex, gavi_sols.decision_inds, gavi_sols.param_inds)
     end
 end
-function set_guide!(::Vector{Poly}, guide)
+function set_guide!(::PolyUnion, guide)
 end
     
 
@@ -402,9 +364,16 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
     end
     # exploration mode (either continuing or starting)
     if !isempty(gavi_sols.Ks) # if recipes available, process
-        @info "Processing recipe. Length of queue: $(length(gavi_sols.Ks))." 
+        @debug "Processing recipe. Length of queue: $(length(gavi_sols.Ks))." 
         K = dequeue!(gavi_sols.Ks)
-        (; piece, exemplar, vertices) = expand(gavi_sols.gavi, gavi_sols.z, gavi_sols.w, K.recipe, gavi_sols.decision_inds, gavi_sols.param_inds)
+        (; piece, exemplar, vertices) = expand(gavi_sols.gavi, 
+                                               gavi_sols.z, 
+                                               gavi_sols.w, 
+                                               K.recipe, 
+                                               gavi_sols.level, 
+                                               gavi_sols.subpiece_index, 
+                                               gavi_sols.decision_inds, 
+                                               gavi_sols.param_inds)
         fval = permute_eval(gavi_sols.guide, exemplar, gavi_sols.decision_inds, gavi_sols.param_inds)
         enqueue!(gavi_sols.polys, PolyExemplar(piece, exemplar), fval) 
         push!(gavi_sols.explored_Ks, K.recipe)
@@ -423,7 +392,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
     elseif !isempty(gavi_sols.vertex_queue) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
-        @info "Exploring vertex. Length of queue: $(length(gavi_sols.vertex_queue)). Num explored: $(length(gavi_sols.explored_vertices))"
+        @debug "Exploring vertex. Length of queue: $(length(gavi_sols.vertex_queue)). Num explored: $(length(gavi_sols.explored_vertices))"
         v = dequeue!(gavi_sols.vertex_queue)
         push!(gavi_sols.explored_vertices, v)
         J = comp_indices(gavi_sols.gavi, v.v[1:length(gavi_sols.z)], v.v[length(gavi_sols.z)+1:end])

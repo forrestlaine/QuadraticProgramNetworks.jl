@@ -11,6 +11,7 @@ function solve(qpn::QPNet, x_init;
                                    qpn.options.debug, 
                                    qpn.options.high_dimension, 
                                    qpn.options.shared_variable_mode, 
+                                   gen_sol=(num_levels(qpn)==1) ? qpn.options.gen_solution_map : true,
                                    rng)
         fin = time()
         qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
@@ -28,7 +29,6 @@ function solve(qpn::QPNet, x_init;
             #x_low = ret_low.x_opt
             x = ret_low.x_opt
             Sol_low = ret_low.Sol
-
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
@@ -48,8 +48,8 @@ function solve(qpn::QPNet, x_init;
                 @info "     Current fair value is $(current_fair_value)."
                 @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
-            @infiltrate
             local S_keep
+            @infiltrate level == 1
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
@@ -81,12 +81,12 @@ function solve(qpn::QPNet, x_init;
                         all_same = false #TODO should queue all non-solutions?
                         break
                     else
-                        @info "     Checking agreement."
+                        @debug "     Checking agreement."
                         current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
                         if current_agrees_with_piece
-                            @info "     Agrees."
+                            @debug "     Agrees."
                         else
-                            @info "     Disagrees."
+                            @debug "     Disagrees."
                         end
                     end
                     if current_agrees_with_piece || same_value_found
@@ -104,6 +104,7 @@ function solve(qpn::QPNet, x_init;
                     end
                 catch e
                     err_count += 1
+                    @infiltrate
                     continue
                 end
             end
@@ -156,21 +157,20 @@ function combine(regions, solutions, level_dim; show_progress=true)
         @error "No solutions to combine... length solutions: 0, length regions: $(length(regions))"
     elseif length(solutions) == 1
         @info "Length solutions is 1, collecting."
-        collect(first(solutions))
+        PolyUnion(collect(first(solutions)))
     else
         @info "Forming complements"
         complements = map(complement, regions)
         @info "Forming combinations"
-        @infiltrate
         it = 0
         combined = map(zip(solutions, complements)) do (s, rc)
             it += 1
             @info it
-            [collect(s); rc]
+            PolyUnion([collect(s); rc.polys])
         end
         #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
         @info "Forming intersection"
         IntersectionRoot(combined, length.(complements), level_dim; show_progress)
-        #vcat([collect(s) for s in solutions]...)
+        #PolyUnion(vcat([collect(s) for s in solutions]...))
     end
 end

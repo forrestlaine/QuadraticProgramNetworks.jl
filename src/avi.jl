@@ -55,7 +55,6 @@ function solve_avi(avi::AVI, z0, w)
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
-        @infiltrate
         return (; z, status=FAILURE)
     end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
@@ -263,7 +262,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
     (; z, status) = solve_gavi(gavi, z0, w)
     
-    status != SUCCESS && @infiltrate
+    #status != SUCCESS && @infiltrate
     status != SUCCESS && @warn "AVI solve error!"
     status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
@@ -295,11 +294,11 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         if shared_variable_mode == MIN_NORM
             @error "not implemented yet" 
         elseif shared_variable_mode == SHARED_DUAL
-            @info "Found solution, now generating solution map (level $(level))"
+            @debug "Found solution, now generating solution map (level $(level))"
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
             Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds; max_vertices = 0) : nothing
-            @info "Solution map generated."
+            @debug "Solution map generated."
             (; x_opt, Sol)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."

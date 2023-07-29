@@ -227,7 +227,7 @@ function simplify(p::BasicPoly; tol=1e-6)
     #    p = Poly(A,l,u,rl,ru,il,iu)
     #catch e
     #end
-    Keep = Dict{SparseVector{Float64,Int64}, Tuple{Float64,Float64,Relation,Relation}}()
+    Keep = Dict{SparseVector{Float64,Int64}, Tuple{Float64,Float64,Relation,Relation,Set{HalfspaceLabel}, Set{HalfspaceLabel}}}()
     for s in p
         exists = false
         for (k,v) in Keep
@@ -268,6 +268,12 @@ function simplify(p::BasicPoly; tol=1e-6)
         end
     end
     Poly(Slice(k, v...) for (k,v) in Keep)
+end
+function simplify(p::ProjectedPoly; tol=1e-6)
+    ProjectedPoly(simplify(p.poly; tol), p.parent)
+end
+function simplify(p::IntersectionPoly; tol=1e-6)
+    IntersectionPoly([simplify(poly; tol) for poly in p.polys])
 end
 
 """
@@ -325,7 +331,7 @@ function closure(p::BasicPoly)
     BasicPoly(Set(closure(s) for s in p))
 end
 function closure(p::ProjectedPoly)
-    ProjectedPoly(BasicPoly(Set(closure(s) for s in p)), p.parent)
+    ProjectedPoly(closure(p.poly), p.parent)
 end
 function closure(p::IntersectionPoly)
     IntersectionPoly([closure(sub_p) for sub_p in p.polys])
@@ -376,7 +382,6 @@ function project(p::Poly, keep_dims; tol=1e-6)
     poly = Polyhedra.polyhedron(hr)
     vr = vrep(poly)
 
-    @infiltrate
 
     N = embedded_dim(p)
 
@@ -422,6 +427,12 @@ function poly_slice(poly::BasicPoly, x::Vector{Union{Float64, Missing}})
         u = S.u - slice_amount
         Slice(a,l,u,S.rl,S.ru,S.il,S.iu)
     end |> Set |> BasicPoly
+end
+function poly_slice(poly::ProjectedPoly, x::Vector{Union{Float64, Missing}})
+    ProjectedPoly(poly_slice(poly.poly, x), poly.parent)
+end
+function poly_slice(poly::IntersectionPoly, x::Vector{Union{Float64, Missing}})
+    IntersectionPoly([poly_slice(p, x) for p in poly.polys])
 end
 
 function exemplar(poly::Poly; tol=1e-4, debug=false)
@@ -663,16 +674,6 @@ function Base.in(x::Vector{Float64}, s::Slice; tol=1e-6)
 end
 
 """
-Intersect p with polys.
-"""
-function poly_intersect(p::Poly, ps::Poly...)
-    d = embedded_dim(p)
-    @assert all(embedded_dim(psi) == d for psi in ps)
-    IntersectionPoly(vcat(p, ps...))
-    #union(p, ps...) # this union is only because Poly is implemented as a Set of Slices
-end
-
-"""
 Union of polyhedra.
 """
 struct PolyUnion
@@ -693,6 +694,18 @@ end
 function Base.iterate(pu::PolyUnion, state)
     iterate(pu.polys, state)
 end
+function Base.vcat(pus::PolyUnion...)
+    PolyUnion(reduce(vcat, pu.polys for pu in pus))
+end
+function Base.getindex(pu::PolyUnion, i)
+    pu.polys[i]
+end
+function Base.firstindex(pu::PolyUnion)
+    firstindex(pu.polys)
+end
+function Base.lastindex(pu::PolyUnion)
+    lastindex(pu.polys)
+end
 
 """
 Return true if x is an element of pu.
@@ -706,17 +719,31 @@ end
 Complement of a polyhedra.
 """
 function complement(s::Slice)
-    out = PolyUnion()
+    out = BasicPoly[]
     if !isinf(s.l)
         push!(out, Poly((Slice(s.a, -Inf, s.l, <, complement(s.rl)),)))
     end
     if !isinf(s.u)
         push!(out, Poly((Slice(s.a, s.u, Inf, complement(s.ru), <),)))
     end
-    out
+    PolyUnion(out)
 end
-function complement(p::BasicPoly)
-    PolyUnion(reduce(vcat, (complement(s) for s in p)))
+function complement(p::Poly)
+    reduce(vcat, (complement(s) for s in p))
+end
+
+"""
+Intersect p with polys.
+"""
+function poly_intersect(p::Union{BasicPoly, ProjectedPoly}...)
+    d = embedded_dim(first(p))
+    @assert all(embedded_dim(psi) == d for psi in p)
+    IntersectionPoly(vcat(p...))
+end
+
+function poly_intersect(p::Union{BasicPoly, ProjectedPoly}, ip::IntersectionPoly)
+    @assert embedded_dim(p) == embedded_dim(ip)
+    IntersectionPoly([p; ip.polys])
 end
 
 """
@@ -725,3 +752,4 @@ Intersect unions of polyhedra. (returns an iterator)
 function poly_intersect(p::PolyUnion, ps::PolyUnion...)
     unions = (poly_intersect(subpieces...) for subpieces in Iterators.product(p, ps...))
 end
+
