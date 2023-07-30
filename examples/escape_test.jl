@@ -14,7 +14,7 @@ function setup(; kwargs...)
     ub = -lb
 
     con_id1 = QPN.add_constraint!(qp_net, cons1, lb, ub)
-    con_id2 = QPN.add_constraint!(qp_net, cons2, lb, ub)
+    con_id2 = QPN.add_constraint!(qp_net, cons2, lb.-1, ub.+1)
            
     cost = 0.5*(y[1]-x[1])^2 + 0.5*(y[2]-x[2])^2
     level = 2

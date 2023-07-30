@@ -1,3 +1,11 @@
+struct Linear <: Function
+    a::Vector{Float64} 
+end
+
+function (f::Linear)(x::Vector{Float64})
+    f.a'*x
+end
+
 struct Quadratic <: Function
     Q::SparseMatrixCSC{Float64, Int32}
     q::Vector{Float64}
@@ -6,6 +14,9 @@ end
 function (f::Quadratic)(x::Vector{Float64})
     0.5*x'*(f.Q*x + f.q)
 end
+
+
+
 
 function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
     Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs)) 

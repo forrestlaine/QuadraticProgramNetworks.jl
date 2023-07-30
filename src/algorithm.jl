@@ -1,5 +1,32 @@
-function solve(qpn::QPNet, x_init; 
+"""
+Request logic:
+
+1. Temporarily ignore any parent-level request. Optimize to local equilibrium (without making requests).
+2. Make requests of lower-levels, if opportunities are identified for further improvement of at-level equilibrium, and re-optimize.
+3. Forward parent-level request to lower levels. re-optimize using resulting low-level solution pieces, if different. 
+4. Form solution map, adhering to parent-level request when possible. 
+"""
+function solve(qpn::QPNet, x_init, parent_level_request=nothing;
         level=1,
+        rng=MersenneTwister())
+    at_level_request = nothing
+    x_opt = x_init
+    while true
+        (; x_opt, Sol, identified_request) = solve_base(qpn, x_opt, at_level_request; level, rng)
+        if isnothing(at_level_request)
+            break
+        end
+    end
+    if isnothing(parent_level_request)
+        (; x_opt, Sol)
+    else
+        (; x_opt, Sol) = solve_base(qpn, x_opt, parent_level_request; request_from_parent=true, level, rng)
+    end
+end
+
+function solve_base(qpn::QPNet, x_init, request; 
+        level=1,
+        request_from_parent=false,
         rng=MersenneTwister())
 
     if level == num_levels(qpn)
@@ -16,7 +43,7 @@ function solve(qpn::QPNet, x_init;
         fin = time()
         qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
         qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
-        return (; x_opt, Sol)
+        return (; x_opt, Sol, identified_request=nothing)
     else
         x = copy(x_init)
         fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
@@ -63,6 +90,7 @@ function solve(qpn::QPNet, x_init;
                                     qpn.options.high_dimension,
                                     qpn.options.shared_variable_mode,
                                     rng)
+                    @infiltrate
                     set_guide!(res.Sol, z->(z-x)'*(z-x))
                     new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                     better_value_found = new_fair_value < current_fair_value - qpn.options.tol
@@ -139,7 +167,7 @@ function solve(qpn::QPNet, x_init;
             S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=true) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
-            return (; x_opt=x, Sol=S)
+            return (; x_opt=x, Sol=S, identified_request=nothing)
         end
         error("Can't find solution.")
     end
