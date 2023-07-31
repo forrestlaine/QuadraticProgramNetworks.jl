@@ -1,6 +1,11 @@
 @testset "pessimistic commitment trilevel" begin
     """
-    variables := p, q₁, q₂ ∈ Δ¹ ⊂ ℝ²
+    
+    Haven't looked at this in a while, but I think the reasoning was that
+    q minimizes its objective, and then with left over degrees of freedom, it acts
+    to provide worst-case solution for p.
+
+    variables := p, q₁ = q₂ ∈ Δ¹ ⊂ ℝ²
     f1: p'Aq₁  (p)
     f2: -p'Aq₁ (q₁)
     f3: p'Bq₂ (q₂)

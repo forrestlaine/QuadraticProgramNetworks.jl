@@ -82,10 +82,18 @@ mutable struct LocalGAVISolutions
     polys::PriorityQueue{PolyExemplar, Float64}
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
-    LocalGAVISolutions(gavi::GAVI, z::Vector{Float64}, w::Vector{Float64}, level::Int, subpiece_index::Int, decision_inds::Vector{Int}, param_inds::Vector{Int}; max_vertices=typemax(Int)) = begin
+    LocalGAVISolutions(gavi::GAVI, 
+                       z::Vector{Float64}, 
+                       w::Vector{Float64}, 
+                       level::Int, 
+                       subpiece_index::Int, 
+                       decision_inds::Vector{Int}, 
+                       param_inds::Vector{Int},
+                       request::Set{Linear};
+                       max_vertices=typemax(Int)) = begin
         n = length(z)
         m = length(w)
-        J = comp_indices(gavi,z,w)
+        J = comp_indices(gavi,z,w,request)
         Ks = all_Ks(J)
         @debug "There are $(length(Ks)) immediately available pieces of this solution map."
         K = pop!(Ks)
@@ -623,23 +631,24 @@ d1 = length(o)
 r2 = z2
 s2 = Az+Bw
 J[1] = {i : l1ᵢ = z1ᵢ      , r1ᵢ > 0 }
-J[2] = {i : l1ᵢ = z1ᵢ      , r1ᵢ = 0 }
+J[2] = {i : l1ᵢ = z1ᵢ      , r1ᵢ = 0 } (WEAK)
 J[3] = {i : l1ᵢ < z1ᵢ < u1ᵢ, r1ᵢ = 0 }
-J[4] = {i :       z1ᵢ = u1ᵢ, r1ᵢ = 0 }
+J[4] = {i :       z1ᵢ = u1ᵢ, r1ᵢ = 0 } (WEAK)
 J[5] = {i :       z1ᵢ = u1ᵢ, r1ᵢ < 0 }
 J[6] = {i : l1ᵢ = z1ᵢ = u1ᵢ, r1ᵢ free}
 J[7]  = {i+d1 : l2ᵢ = s2       , r2ᵢ > 0 }
-J[8]  = {i+d1 : l2ᵢ = s2ᵢ      , r2ᵢ = 0 }
+J[8]  = {i+d1 : l2ᵢ = s2ᵢ      , r2ᵢ = 0 } (WEAK)
 J[9]  = {i+d1 : l2ᵢ < s2ᵢ < u2ᵢ, r2ᵢ = 0 }
-J[10] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ = 0 }
+J[10] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ = 0 } (WEAK)
 J[11] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ < 0 }
 J[12] = {i+d1 : l2ᵢ = s2ᵢ = u2ᵢ, r2ᵢ free}
 """
-function comp_indices(gavi::GAVI, z, w; tol=1e-4)
+function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4)
     avi1 = AVI(gavi.M, gavi.N, gavi.o, gavi.l1, gavi.u1)
     r1 = gavi.M*z+gavi.N*w+gavi.o
     z1 = z[1:length(gavi.o)]
     J1 = comp_indices(avi1, r1, z1, w; tol)
+    revise_indices!(J1, avi1, premuted_request)
    
     d1 = length(gavi.o)
     d2 = length(gavi.l2)
@@ -650,6 +659,7 @@ function comp_indices(gavi::GAVI, z, w; tol=1e-4)
     r2 = M2*z
     s2 = gavi.A*z+gavi.B*w
     J2 = comp_indices(avi2, r2, s2, w; tol)
+    revise_indices!(J2, avi2, premuted_request)
 
     J = Dict{Int, Vector{Int}}()
     for (key,value) in J1
@@ -665,3 +675,8 @@ function comp_indices(gavi::GAVI, z, w; tol=1e-4)
     end
     J
 end
+
+function revise_indices!(J, avi, request)
+    nothing
+end
+

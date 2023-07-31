@@ -20,7 +20,7 @@ function setup(; kwargs...)
     level = 2
     QPN.add_qp!(qp_net, level, cost, [con_id1,], y)
 
-    cost = y[1]-x[1] + y[2]-x[2]
+    cost = y[1]-x[1]
     level = 1
     QPN.add_qp!(qp_net, level, cost, [con_id2,], x)
     

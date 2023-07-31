@@ -125,7 +125,7 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
+function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{Int}();
                    var_indices=nothing,
                    level=0,
                    subpiece_index=0,
@@ -184,10 +184,18 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     end |> (x->vcat.(x...))
     
 
+    offset = N_private_vars + (N_players+1)*N_shared_vars
+    S_dual_inds = nothing
     As, A2s, Bs, ls, us = map(constraint_order) do id
         # TODO make sure that As / A2s accounts for auxiliary variables
         # properly (should be part of shared vars I think)
         (; A,l,u) = vectorize(qep.constraints[id].poly)
+        con_dim = length(l)
+        if id == -1
+            S_dual_inds = collect(offset+1:offset+con_dim)
+        else
+            offset += con_dim
+        end
         local_aux_dim = size(A,2) - x_dim
         player_to_group_map = qep.constraints[id].group_mapping
         group_to_player_map = Dict{Int, Vector{Int}}()
@@ -220,7 +228,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         end
         [A1 Ax], A2, B1, l1, u1
     end |> (x->vcat.(x...))
-
+    
     M11 = Qs
     M12 = underconstrained ? Mψ : spzeros(size(Mψ))
     M13 = -A2s'
@@ -258,10 +266,12 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     # TODO : if I want to support successive minimization of ||ψ|| over
     # iterations, need to properly warmstart with previous solution? Might
     # require reducing dimension AFTER psi minimization
+
  
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
     (; z, status) = solve_gavi(gavi, z0, w)
-    
+
+
     #status != SUCCESS && @infiltrate
     status != SUCCESS && @warn "AVI solve error!"
     status != SUCCESS && error("AVI solve error!")
@@ -289,7 +299,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         reduced_piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
 	    @infiltrate !(x_opt in reduced_piece)
         @infiltrate embedded_dim(reduced_piece) > length(x_opt)
-        (; x_opt, Sol=[reduced_piece,])
+        (; x_opt, Sol=[reduced_piece,], identified_request=nothing)
     else
         if shared_variable_mode == MIN_NORM
             @error "not implemented yet" 
@@ -297,9 +307,29 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
             @debug "Found solution, now generating solution map (level $(level))"
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds; max_vertices = 0) : nothing
+
+            # TODO figure out request structure with vertex expansion (is
+            # v-enum even required?)
+            
+            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 0) : nothing
             @debug "Solution map generated."
-            (; x_opt, Sol)
+            if isnothing(S)
+                identified_request = Set{Linear}()
+            else
+                S_duals = z[S_dual_inds]
+                @assert length(S_duals) == length(S)
+                (; A, l, u) = vectorize(S)
+                identified_request = Linear[]
+                for (i,λ) in enumerate(S_duals)
+                    if λ ≥ 1e-4
+                        push!(identified_request, Linear(A[i,:]))
+                    elseif λ ≤ -1e-4
+                        push!(identified_request, Linear(-A[i,:]))
+                    end
+                end
+                identified_request = Set(identified_request)
+            end
+            (; x_opt, Sol, identified_request)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."
         end

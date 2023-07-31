@@ -5,16 +5,22 @@ Request logic:
 2. Make requests of lower-levels, if opportunities are identified for further improvement of at-level equilibrium, and re-optimize.
 3. Forward parent-level request to lower levels. re-optimize using resulting low-level solution pieces, if different. 
 4. Form solution map, adhering to parent-level request when possible. 
+
+Lots of inefficiencies: 
+    -bottom level should never ignore requests from parent
+    -shouldn't have to ignore always, maybe I can assume that only passed if already at optimum
 """
 function solve(qpn::QPNet, x_init, parent_level_request=nothing;
         level=1,
         rng=MersenneTwister())
-    at_level_request = nothing
+    at_level_request = Set{Linear}()
     x_opt = x_init
     while true
         (; x_opt, Sol, identified_request) = solve_base(qpn, x_opt, at_level_request; level, rng)
-        if isnothing(at_level_request)
+        if isempty(identified_request)
             break
+        else
+            at_level_request = identified_request
         end
     end
     if isnothing(parent_level_request)
@@ -29,10 +35,11 @@ function solve_base(qpn::QPNet, x_init, request;
         request_from_parent=false,
         rng=MersenneTwister())
 
+    @infiltrate
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init; 
+        (; x_opt, Sol) = solve_qep(qep, x_init, request; 
                                    qpn.var_indices,
                                    level,
                                    qpn.options.debug, 
@@ -43,7 +50,7 @@ function solve_base(qpn::QPNet, x_init, request;
         fin = time()
         qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
         qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
-        return (; x_opt, Sol, identified_request=nothing)
+        return (; x_opt, Sol, identified_request=Set{Linear}())
     else
         x = copy(x_init)
         fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
@@ -52,7 +59,7 @@ function solve_base(qpn::QPNet, x_init, request;
         sub_inds = sub_indices(qpn, level)
 
         for iters in 1:qpn.options.max_iters
-            ret_low = solve(qpn, x; level=level+1, rng)
+            ret_low = solve(qpn, x, request; level=level+1, rng)
             #x_low = ret_low.x_opt
             x = ret_low.x_opt
             Sol_low = ret_low.Sol
@@ -60,7 +67,9 @@ function solve_base(qpn::QPNet, x_init, request;
             start = time()
             local_xs = []
             local_solutions = [] #Vector{LocalAVISolutions}()
-            local_regions = Vector{Poly}()
+            local_regions = Poly[]
+            identified_request = Set{Linear}()
+            
             all_same = true
             low_feasible = false
             current_fair_value = fair_objective(x)
@@ -82,7 +91,7 @@ function solve_base(qpn::QPNet, x_init, request;
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
                 try
-                    res = solve_qep(qep, x, S_keep, sub_inds;
+                    res = solve_qep(qep, x, request, S_keep, sub_inds;
                                     qpn.var_indices,
                                     level,
                                     subpiece_index=e,
@@ -123,9 +132,13 @@ function solve_base(qpn::QPNet, x_init, request;
                         # piece. Warning: These pieces may then be NON-LOCAL.
                         # Needed for some problems (e.g. pessimistic
                         # committment).
+                        #
+                        # TODO: I think this logic needs to be changed.
+                        #
                         push!(local_xs, res.x_opt)
                         push!(local_solutions, res.Sol)
                         push!(local_regions, S_keep)
+                        union!(identified_request, res.identified_request)
                     else # poor-valued neighbor
                         throw_count += 1
                         continue
@@ -167,7 +180,7 @@ function solve_base(qpn::QPNet, x_init, request;
             S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=true) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
-            return (; x_opt=x, Sol=S, identified_request=nothing)
+            return (; x_opt=x, Sol=S, identified_request)
         end
         error("Can't find solution.")
     end
