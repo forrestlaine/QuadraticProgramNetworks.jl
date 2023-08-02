@@ -2,6 +2,13 @@ struct Linear <: Function
     a::Vector{Float64} 
 end
 
+function Base.isequal(L1::Linear, L2::Linear)
+    isequal(L1.a, L2.a)
+end
+function Base.hash(L::Linear, h::UInt)
+    hash(("hi",L.a))
+end
+
 function (f::Linear)(x::Vector{Float64})
     f.a'*x
 end
@@ -14,9 +21,6 @@ end
 function (f::Quadratic)(x::Vector{Float64})
     0.5*x'*(f.Q*x + f.q)
 end
-
-
-
 
 function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
     Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs)) 

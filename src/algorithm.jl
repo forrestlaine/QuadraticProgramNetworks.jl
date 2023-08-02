@@ -20,7 +20,7 @@ function solve(qpn::QPNet, x_init, parent_level_request=nothing;
         if isempty(identified_request)
             break
         else
-            at_level_request = identified_request
+            union!(at_level_request, identified_request)
         end
     end
     if isnothing(parent_level_request)
@@ -35,7 +35,6 @@ function solve_base(qpn::QPNet, x_init, request;
         request_from_parent=false,
         rng=MersenneTwister())
 
-    @infiltrate
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
@@ -63,6 +62,7 @@ function solve_base(qpn::QPNet, x_init, request;
             #x_low = ret_low.x_opt
             x = ret_low.x_opt
             Sol_low = ret_low.Sol
+            req = Set{Linear}()
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
@@ -85,13 +85,12 @@ function solve_base(qpn::QPNet, x_init, request;
                 @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
             local S_keep
-            @infiltrate level == 1
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
-                try
-                    res = solve_qep(qep, x, request, S_keep, sub_inds;
+                #try
+                    res = solve_qep(qep, x, req, S_keep, sub_inds;
                                     qpn.var_indices,
                                     level,
                                     subpiece_index=e,
@@ -99,7 +98,6 @@ function solve_base(qpn::QPNet, x_init, request;
                                     qpn.options.high_dimension,
                                     qpn.options.shared_variable_mode,
                                     rng)
-                    @infiltrate
                     set_guide!(res.Sol, z->(z-x)'*(z-x))
                     new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                     better_value_found = new_fair_value < current_fair_value - qpn.options.tol
@@ -143,11 +141,11 @@ function solve_base(qpn::QPNet, x_init, request;
                         throw_count += 1
                         continue
                     end
-                catch e
-                    err_count += 1
-                    @infiltrate
-                    continue
-                end
+                #catch e
+                #    err_count += 1
+                #    @infiltrate
+                #    continue
+                #end
             end
 
             if sub_count > 0 && err_count == sub_count
@@ -155,12 +153,16 @@ function solve_base(qpn::QPNet, x_init, request;
             end
 
             if !current_infeasible && !low_feasible
-                res = solve_qep(qep, x, S_keep, sub_inds; qpn.options.high_dimension, qpn.var_indices)
+
+                res = solve_qep(qep, x, req, S_keep, sub_inds; qpn.options.high_dimension, qpn.var_indices)
                 diff = norm(x-res.x_opt)
                 qpn.options.debug && println("Diff :", diff)
                 x .= res.x_opt
                 all_same = false
             end
+
+            identified_request = setdiff(identified_request, request)
+
             fin = time()
             qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.") 
             qpn.options.debug && display_debug(level, iters, x, sub_count, throw_count)
@@ -174,6 +176,8 @@ function solve_base(qpn::QPNet, x_init, request;
                     continue
                 end
             end
+
+            @infiltrate
 
             level_dim = length(param_indices(qpn, level))
             @info "Combining pieces"

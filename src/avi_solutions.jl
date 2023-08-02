@@ -548,6 +548,7 @@ function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-
     riszero = isapprox.(r, 0; atol=tol)
     d = size(avi.M,2) + size(avi.N,2)
     e = (i -> (ei = zeros(d); ei[i] = 1.0; ei))
+    try
     for i = 1:length(z)
         if isapprox(z[i], avi.l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
             if any( -e(i) ≈ req.a for req in permuted_request) || riszero[i]
@@ -577,6 +578,9 @@ function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-
             @assert equal_bounds[i]
             push!(J[6], i)
         end
+    end
+    catch e
+        @infiltrate
     end
     #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
     #J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
