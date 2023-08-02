@@ -22,7 +22,10 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
     if isempty(parent_level_request)
         at_level_request = Set{Linear}()
         while true
-            @info "$indent Calling solve_base at level $level. at_level_request is $at_level_request."
+            @info "$indent Calling solve_base at level $level. at_level_request is:"
+            for req in at_level_request
+                @info "$indent      $req"
+            end
             @info "$indent x before solve is $x_in"
             (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, at_level_request; level, rng)
             @info "$indent x after solve is $x_opt"
@@ -37,7 +40,10 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
         end
         return (; x_opt, Sol)
     else
-        @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request ($parent_level_request)."
+        @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request:"
+        for req in parent_level_request
+            @info "$indent      $req"
+        end
         @info "$indent x before solve is $x_in"
         (; x_opt, Sol) = solve_base!(qpn, x_in, parent_level_request; level, rng)
         @info "$indent x_opt after solve is $x_opt"
@@ -73,7 +79,6 @@ function solve_base!(qpn::QPNet, x_init, request;
 
         for iters in 1:qpn.options.max_iters
             ret_low = solve(qpn, x, request; level=level+1, rng)
-            #x_low = ret_low.x_opt
             x = ret_low.x_opt
             Sol_low = ret_low.Sol
             set_guide!(Sol_low, fair_objective)
@@ -98,6 +103,7 @@ function solve_base!(qpn::QPNet, x_init, request;
                 @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
             local S_keep
+            #@infiltrate level == 1
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
@@ -109,6 +115,7 @@ function solve_base!(qpn::QPNet, x_init, request;
                                     subpiece_index=e,
                                     qpn.options.debug,
                                     qpn.options.high_dimension,
+                                    qpn.options.make_requests,
                                     qpn.options.shared_variable_mode,
                                     rng)
                     set_guide!(res.Sol, z->(z-x)'*(z-x))
@@ -155,7 +162,7 @@ function solve_base!(qpn::QPNet, x_init, request;
                         throw_count += 1
                         continue
                     end
-                catch e
+                catch err
                     err_count += 1
                     @infiltrate
                     continue
@@ -212,12 +219,9 @@ function combine(regions, solutions, level_dim; show_progress=true)
     if length(solutions) == 0
         @error "No solutions to combine... length solutions: 0, length regions: $(length(regions))"
     elseif length(solutions) == 1
-        @info "Length solutions is 1, collecting."
         PolyUnion(collect(first(solutions)))
     else
-        @info "Forming complements"
         complements = map(complement, regions)
-        @info "Forming combinations"
         it = 0
         combined = map(zip(solutions, complements)) do (s, rc)
             it += 1
@@ -225,7 +229,6 @@ function combine(regions, solutions, level_dim; show_progress=true)
             PolyUnion([collect(s); rc.polys])
         end
         #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
-        @info "Forming intersection"
         IntersectionRoot(combined, length.(complements), level_dim; show_progress)
         #PolyUnion(vcat([collect(s) for s in solutions]...))
     end

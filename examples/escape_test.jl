@@ -1,6 +1,4 @@
-using Infiltrator
 using QPN
-
 
 function setup(; kwargs...)
     x = QPN.variables(:x, 1:2) 

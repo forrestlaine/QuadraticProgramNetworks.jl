@@ -131,6 +131,7 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
                    subpiece_index=0,
                    debug=false,
                    high_dimension=false,
+                   make_requests=false,
                    gen_sol=true,
                    shared_variable_mode=SHARED_DUAL,
                    rng=MersenneTwister(1))
@@ -310,12 +311,12 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
 
             # TODO figure out request structure with vertex expansion (is
             # v-enum even required?)
-            
             Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 0) : nothing
             @debug "Solution map generated."
-            if isnothing(S)
+            if isnothing(S) || !make_requests
                 identified_request = Set{Linear}()
             else
+                @infiltrate level∈[1,2]
                 S_duals = z[S_dual_inds]
                 @assert length(S_duals) == length(S)
                 (; A, l, u) = vectorize(S)

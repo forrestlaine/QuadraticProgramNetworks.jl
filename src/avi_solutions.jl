@@ -78,8 +78,14 @@ function project_and_permute(S, var_inds, param_inds)
     dv = length(var_inds)
     dp = length(param_inds)
     projection_inds = [collect(1:dv); collect(d-dp+1:d)]
-    
-    piece = project(S, projection_inds)
+   
+    local piece
+    try
+        piece = project(S, projection_inds)
+    catch err
+        @infiltrate
+    end
+
     permute!(piece.poly, var_inds, param_inds) 
     permute!(piece.parent, var_inds, param_inds)
 
@@ -546,40 +552,59 @@ J[4] = {i :      zᵢ = uᵢ, rᵢ = 0 }
 J[5] = {i :      zᵢ = uᵢ, rᵢ < 0 }
 J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ free}
 """
-function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
+#function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
+function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
     J = Dict(i=>Int[] for i = 1:6)
-    equal_bounds = isapprox.(avi.l, avi.u; atol=tol)
+    equal_bounds = isapprox.(l, u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
-    d = size(avi.M,2) + size(avi.N,2)
-    e = (i -> (ei = zeros(d); ei[i] = 1.0; ei))
+    d = size(M,2) + size(N,2)
+    num_requests = length(permuted_request)
+    requests_granted = 0
     try
     for i = 1:length(z)
-        if isapprox(z[i], avi.l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
-            if any( -e(i) ≈ req.a for req in permuted_request) || riszero[i]
-                push!(J[2],i)
-            else
-                push!(J[1],i)
-            end
-        elseif avi.l[i]+tol < z[i] < avi.u[i]-tol && riszero[i] && !equal_bounds[i]
-            if any(-[avi.M[i,:]; avi.N[i,:]] ≈ req.a for req in permuted_request) && !isinf(avi.l[i])
+        if isapprox(z[i], l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
+            if any( -[A[i,:]; B[i,:]] ≈ req.a for req in permuted_request)
+                @info "Request granted :) $(collect(-[A[i,:]; B[i,:]]))"
                 push!(J[2], i)
-            elseif any([avi.M[i,:]; avi.N[i,:]] ≈ req.a for req in permuted_request) && !isinf(avi.u[i])
+                requests_granted += 1
+            else
+                if riszero[i]
+                    push!(J[2],i)
+                else
+                    push!(J[1],i)
+                end
+            end
+        elseif l[i]+tol < z[i] < u[i]-tol && riszero[i] && !equal_bounds[i]
+            if any(-[M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(l[i])
+                @info "Request granted :) $(collect(-[M[i,:]; N[i,:]]))"
+                push!(J[2], i)
+                requests_granted += 1
+            elseif any([M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(u[i])
+                @info "Request granted :) $(collect([M[i,:]; N[i,:]]))"
                 push!(J[4], i)
+                requests_granted += 1
             else
                 push!(J[3], i)
             end
-        elseif isapprox(z[i], avi.u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
-            if any( e(i) ≈ req.a for req in permuted_request) || riszero[i]
+        elseif isapprox(z[i], u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
+            if any( [A[i,:]; B[i,:]] ≈ req.a for req in permuted_request)
+                @info "Request granted :) $(collect([A[i,:]; B[i,:]]))"
                 push!(J[4], i)
+                requests_granted += 1
             else
-                push!(J[5], i)
+                if riszero[i]
+                    push!(J[4], i)
+                else
+                    push!(J[5], i)
+                end
             end
         else
             @assert equal_bounds[i]
             push!(J[6], i)
         end
     end
-    catch e
+    @infiltrate num_requests > 0 && num_requests != requests_granted 
+    catch err
         @infiltrate
     end
     #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
@@ -616,20 +641,26 @@ J[11] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ < 0 }
 J[12] = {i+d1 : l2ᵢ = s2ᵢ = u2ᵢ, r2ᵢ free}
 """
 function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4)
-    avi1 = AVI(gavi.M, gavi.N, gavi.o, gavi.l1, gavi.u1)
-    r1 = gavi.M*z+gavi.N*w+gavi.o
-    z1 = z[1:length(gavi.o)]
-    J1 = comp_indices(avi1, r1, z1, w, permuted_request; tol)
-   
     d1 = length(gavi.o)
     d2 = length(gavi.l2)
+    @assert length(z) == d1+d2
+    m = length(w)
+
+    #avi1 = AVI(gavi.M, gavi.N, gavi.o, gavi.l1, gavi.u1)
+    r1 = gavi.M*z+gavi.N*w+gavi.o
+    z1 = z[1:d1]
+    
+    #J1 = comp_indices(avi1, r1, z1, w, permuted_request; tol)
+    J1 = comp_indices(gavi.M, gavi.N, sparse(I, d1,d1+d2), spzeros(d1,m), gavi.l1, gavi.u1, r1, z1, w, permuted_request; tol)
+   
     M2 = [spzeros(d2, d1) sparse(I,d2,d2)]
     N2 = spzeros(d2, length(w))
     o2 = zeros(d2)
-    avi2 = AVI(M2, N2, o2, gavi.l2, gavi.u2)
+    #avi2 = AVI(M2, N2, o2, gavi.l2, gavi.u2)
     r2 = M2*z
     s2 = gavi.A*z+gavi.B*w
-    J2 = comp_indices(avi2, r2, s2, w, permuted_request; tol)
+    #J2 = comp_indices(avi2, r2, s2, w, permuted_request; tol)
+    J2 = comp_indices(M2, N2, gavi.A, gavi.B, gavi.l2, gavi.u2, r2, s2, w, permuted_request; tol)
 
     J = Dict{Int, Vector{Int}}()
     for (key,value) in J1
