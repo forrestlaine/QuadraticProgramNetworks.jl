@@ -321,10 +321,10 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
                 (; A, l, u) = vectorize(S)
                 identified_request = Linear[]
                 for (i,λ) in enumerate(S_duals)
-                    if λ ≥ 1e-4
-                        push!(identified_request, Linear(A[i,:]))
-                    elseif λ ≤ -1e-4
-                        push!(identified_request, Linear(-A[i,:]))
+                    if λ ≥ 1e-4 && has_parent(S, i)
+                        append!(identified_request, propagate_request(A[i,:], get_parent(S, i)))
+                    elseif λ ≤ -1e-4 && has_parent(S, i)
+                        append!(identified_request, propagate_request(-A[i,:], get_parent(S, i)))
                     end
                 end
                 identified_request = Set(identified_request)
@@ -334,6 +334,34 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
             @error "Invalid shared variable mode: $shared_variable_mode."
         end
     end
+end
+
+function propagate_request(request, poly)
+    m = OSQP.Model()
+    d = embedded_dim(poly)
+    q = zeros(d)
+    q[1:length(request)] = request
+    (; A, l, u) = vectorize(poly)
+    OSQP.setup!(m; q, A, l, u,
+                verbose=false,
+                polish=true,
+                eps_abs=1e-8,
+                eps_rel=1e-8)
+    ret = OSQP.solve!(m)
+    prop_requests = Linear[]
+    if ret.info.status_val == 1
+        duals = -ret.y
+        for (i, λ) in enumerate(duals)
+            if λ ≥ 1e-4
+                push!(prop_requests, Linear(A[i,:]))
+            elseif λ ≤ -1e-4
+                push!(prop_requests, Linear(-A[i,:]))
+            end
+        end
+    else
+        @infiltrate
+    end
+    prop_requests
 end
 
 """

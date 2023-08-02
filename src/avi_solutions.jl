@@ -55,6 +55,24 @@ function permute!(P::Poly, var_inds, param_inds)
     end
 end
 
+function unpermute(request::Set{Linear}, var_inds, param_inds)
+    isempty(request) && return request
+    example = first(request)
+    dim = length(example.a)
+    dv = length(var_inds)
+    dp = length(param_inds)
+    extra_inds = setdiff(1:dim, [var_inds; param_inds])
+ 
+    original_request = Iterators.map(request) do req
+        a = req.a
+        a_orig = zeros(dim)
+        a_orig[1:dv] = a[var_inds]
+        a_orig[dv+1:dim-dp] = a[extra_inds]
+        a_orig[end-dp+1:end] = a[param_inds]
+        Linear(a_orig)
+    end |> Set 
+end
+
 function project_and_permute(S, var_inds, param_inds)
     d = embedded_dim(S)
     dv = length(var_inds)
@@ -62,7 +80,8 @@ function project_and_permute(S, var_inds, param_inds)
     projection_inds = [collect(1:dv); collect(d-dp+1:d)]
     
     piece = project(S, projection_inds)
-    permute!(piece, var_inds, param_inds) 
+    permute!(piece.poly, var_inds, param_inds) 
+    permute!(piece.parent, var_inds, param_inds)
 
     return simplify(piece)
 end
@@ -82,6 +101,7 @@ mutable struct LocalGAVISolutions
     polys::PriorityQueue{PolyExemplar, Float64}
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
+    permuted_request::Set{Linear}
     LocalGAVISolutions(gavi::GAVI, 
                        z::Vector{Float64}, 
                        w::Vector{Float64}, 
@@ -93,7 +113,8 @@ mutable struct LocalGAVISolutions
                        max_vertices=typemax(Int)) = begin
         n = length(z)
         m = length(w)
-        J = comp_indices(gavi,z,w,request)
+        permuted_request = unpermute(request, decision_inds, param_inds)
+        J = comp_indices(gavi,z,w,permuted_request)
         Ks = all_Ks(J)
         @debug "There are $(length(Ks)) immediately available pieces of this solution map."
         K = pop!(Ks)
@@ -111,7 +132,7 @@ mutable struct LocalGAVISolutions
         explored_Ks = Set{PolyRecipe}((K,))
         explored_vertices = Set{Vertex}()
         guide = (x->Inf)
-        new(gavi, z, w, level, subpiece_index, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds)
+        new(gavi, z, w, level, subpiece_index, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds, permuted_request)
     end
 end
 
@@ -284,25 +305,6 @@ end
 function set_guide!(::PolyUnion, guide)
 end
     
-
-#J = comp_indices(gavi,z,w)
-#K = random_K(J, rng)
-#
-#nv = length(decision_inds)
-#np = length(param_inds)
-#nd = n - nv - np
-#reducible_inds = nv+1:n
-#(; piece, reduced_inds) = local_piece(gavi,n,m,K; reducible_inds)
-#if permute 
-#    permute!(piece, decision_inds, param_inds)
-#end
-#
-#x = zeros(dx)
-#x[decision_inds] = z[1:length(decision_inds)]
-#x[param_inds] = w
-#
-#(; piece, x_opt=x, reduced_inds)
-
 function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_dim=false)
     n = length(z)
     m = length(w)
@@ -310,21 +312,23 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
     nv = length(decision_inds)
     #reducible_inds = nv+1:n
     reducible_inds = []
-    #(; piece, reduced_inds) = local_piece(gavi,n,m,K,decision_inds,param_inds; reducible_inds)
     (; piece, reduced_inds) = local_piece(gavi,n,m,K,level,subpiece_index; reducible_inds)
     
 
     #remaining_inds = setdiff(1:n, reduced_inds)
     #z = z[remaining_inds] 
     #n = length(z)
-    #
-    (; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
-    vertices = [ [v; w] for v in V]
-    rays = [ [r.a; zero(w)] for r in R]
-    lines = [ [l.a; zero(w)] for l in L]
-    avg_vertex = sum(vertices) / length(vertices)
-    exemplar = avg_vertex + sum(rays; init=zeros(n+m)) + sum(lines; init=zeros(n+m))
-    @infiltrate exemplar ∉ piece
+
+    #(; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
+    #vertices = [ [v; w] for v in V]
+    #rays = [ [r.a; zero(w)] for r in R]
+    #lines = [ [l.a; zero(w)] for l in L]
+    #avg_vertex = sum(vertices) / length(vertices)
+    #exemplar = avg_vertex + sum(rays; init=zeros(n+m)) + sum(lines; init=zeros(n+m))
+    #@infiltrate exemplar ∉ piece
+
+    vertices = []
+    exemplar = zeros(n+m)
     
     piece = project_and_permute(piece, decision_inds, param_inds)
 
@@ -403,7 +407,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
         @debug "Exploring vertex. Length of queue: $(length(gavi_sols.vertex_queue)). Num explored: $(length(gavi_sols.explored_vertices))"
         v = dequeue!(gavi_sols.vertex_queue)
         push!(gavi_sols.explored_vertices, v)
-        J = comp_indices(gavi_sols.gavi, v.v[1:length(gavi_sols.z)], v.v[length(gavi_sols.z)+1:end])
+        J = comp_indices(gavi_sols.gavi, v.v[1:length(gavi_sols.z)], v.v[length(gavi_sols.z)+1:end], gavi_sols.permuted_request)
         Ks = all_Ks(J) |> (Ks -> setdiff(Ks, gavi_sols.explored_Ks))
         for K in Ks
             fval = permute_eval(gavi_sols.guide, v.v, gavi_sols.decision_inds, gavi_sols.param_inds)
@@ -421,51 +425,6 @@ function find_non_trivial(A,l,u,reduced_inds)
     ret = [(!isinf(l[i]) || !isinf(u[i])) && i ∈ non_zero_rows for i in 1:length(l)]
 end
 
-#"""
-#K[1] : Mz+Nw+o ≥ 0, z = l
-#K[2] : Mz+Nw+o = 0, l ≤ z ≤ u
-#K[3] : Mz+Nw+o ≤ 0, z = u
-#K[4] : Mz+Nw+o free, l = z = u
-#"""
-#function local_piece(avi::AVI, n, m, K; reducible_inds=Vector{Int}())
-#    A = [avi.M avi.N;
-#         I(n) spzeros(n,m)]
-#
-#    lo_reduced = []
-#    up_reduced = []
-#    bounds = mapreduce(vcat, 1:n) do i
-#        if i ∈ K[1]
-#            i ∈ reducible_inds && push!(lo_reduced, i)
-#            [-avi.o[i] Inf avi.l[i] avi.l[i]]
-#        elseif i ∈ K[2]
-#            [-avi.o[i] -avi.o[i] avi.l[i] avi.u[i]] 
-#        elseif i ∈ K[3]
-#            i ∈ reducible_inds && push!(up_reduced, i)
-#            [-Inf -avi.o[i] avi.u[i] avi.u[i]]
-#        else
-#            i ∈ reducible_inds && push!(lo_reduced, i)
-#            [-Inf Inf avi.l[i] avi.u[i]]
-#        end
-#    end
-#    l = [bounds[:,1]; bounds[:,3]]
-#    u = [bounds[:,2]; bounds[:,4]]
-#    noisy_inds = l.>u
-#    l[noisy_inds] = u[noisy_inds]
-#
-#
-#    reduced_inds = [lo_reduced; up_reduced]
-#    notreduced_inds = setdiff(1:size(A,2), reduced_inds)
-#    Al = A[:,lo_reduced]
-#    Au = A[:,up_reduced]
-#    A = A[:,notreduced_inds]
-#
-#    reduced_contributions = Al * bounds[lo_reduced,3] + Au * bounds[up_reduced,4]
-#    l -= reduced_contributions
-#    u -= reduced_contributions
-#    
-#    meaningful = find_non_trivial(A,l,u, reduced_inds)
-#    (; piece = Poly(A[meaningful,:], l[meaningful], u[meaningful]), reduced_inds)
-#end
 """
 K[1] : Mz+Nw+o ≥ 0, z = l
 K[2] : Mz+Nw+o = 0, l ≤ z ≤ u
@@ -489,52 +448,29 @@ function local_piece(gavi::GAVI, n, m, K, level, subpiece_index; reducible_inds=
     lo_reduced = []
     up_reduced = []
     zero_reduced = []
-    bounds_and_labels = mapreduce(vcat, 1:n) do i
+    bounds = mapreduce(vcat, 1:n) do i
         if i ∈ K[1]
-            [-gavi.o[i] Inf gavi.l1[i] gavi.l1[i] 0 0 0 1]
+            [-gavi.o[i] Inf gavi.l1[i] gavi.l1[i]]
         elseif i ∈ K[2]
-            labels = [0 0 0 0]
-            if !isinf(gavi.u1[i])
-                labels[1] = 4 
-            end
-            if !isinf(gavi.l1[i])
-                labels[2] = 3 
-            end
-            [-gavi.o[i] -gavi.o[i] gavi.l1[i] gavi.u1[i] labels] 
+            [-gavi.o[i] -gavi.o[i] gavi.l1[i] gavi.u1[i]] 
         elseif i ∈ K[3]
-            [-Inf -gavi.o[i] gavi.u1[i] gavi.u1[i] 0 0 2 0]
+            [-Inf -gavi.o[i] gavi.u1[i] gavi.u1[i]]
         elseif i ∈ K[4]
-            [-Inf Inf gavi.l1[i] gavi.u1[i] 0 0 0 0]
+            [-Inf Inf gavi.l1[i] gavi.u1[i]]
         elseif i ∈ K[5]
-            [0 Inf gavi.l2[i-d1] gavi.l2[i-d1] 0 0 0 1]
+            [0 Inf gavi.l2[i-d1] gavi.l2[i-d1]]
         elseif i ∈ K[6]
-            labels = [0 0 0 0]
-            if !isinf(gavi.u2[i-d1])
-                labels[1] = 4 
-            end
-            if !isinf(gavi.l2[i-d1])
-                labels[2] = 3 
-            end
-            [0.0 0 gavi.l2[i-d1] gavi.u2[i-d1] labels]
+            [0.0 0 gavi.l2[i-d1] gavi.u2[i-d1]]
         elseif i ∈ K[7]
-            [-Inf 0 gavi.u2[i-d1] gavi.u2[i-d1] 0 0 2 0]
+            [-Inf 0 gavi.u2[i-d1] gavi.u2[i-d1]]
         elseif i ∈ K[8]
-            [-Inf Inf gavi.l2[i-d1] gavi.u2[i-d1] 0 0 0 0]
+            [-Inf Inf gavi.l2[i-d1] gavi.u2[i-d1]]
         else
             @infiltrate
         end
     end
-    l = [bounds_and_labels[:,1]; bounds_and_labels[:,3]]
-    u = [bounds_and_labels[:,2]; bounds_and_labels[:,4]]
-
-    top_labels_l, top_labels_u, bottom_labels_l, bottom_labels_u = map(5:8) do j
-        map(1:n) do i
-            bounds_id = bounds_and_labels[i, j]
-            bounds_id == 0 ? Set{HalfspaceLabel}() : Set((HalfspaceLabel(level, subpiece_index, i, bounds_id),))
-        end
-    end
-    labels_l = [top_labels_l; bottom_labels_l]
-    labels_u = [top_labels_u; bottom_labels_u]
+    l = [bounds[:,1]; bounds[:,3]]
+    u = [bounds[:,2]; bounds[:,4]]
 
     noisy_inds = l.>u
     l[noisy_inds] = u[noisy_inds]
@@ -593,7 +529,7 @@ function local_piece(gavi::GAVI, n, m, K, level, subpiece_index; reducible_inds=
     end
 
     meaningful = find_non_trivial(A,l,u,reduced_inds)
-    (; piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful], labels_l[meaningful], labels_u[meaningful])), reduced_inds)
+    (; piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful])), reduced_inds)
 end
 
 """
@@ -606,16 +542,48 @@ J[4] = {i :      zᵢ = uᵢ, rᵢ = 0 }
 J[5] = {i :      zᵢ = uᵢ, rᵢ < 0 }
 J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ free}
 """
-function comp_indices(avi::AVI, r, z, w; tol=1e-4)
-    J = Dict{Int, Vector{Int}}()
+function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
+    J = Dict(i=>Int[] for i = 1:6)
     equal_bounds = isapprox.(avi.l, avi.u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
-    J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
-    J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
-    J[3] = findall( (avi.l.+tol .< z .< avi.u.-tol) .&& riszero .&& .!equal_bounds)
-    J[4] = findall( isapprox.(z, avi.u; atol=tol) .&& riszero .&& .!equal_bounds)
-    J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol .&& .!equal_bounds)
-    J[6] = findall( equal_bounds)
+    d = size(avi.M,2) + size(avi.N,2)
+    e = (i -> (ei = zeros(d); ei[i] = 1.0; ei))
+    for i = 1:length(z)
+        if isapprox(z[i], avi.l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
+            if any( -e(i) ≈ req.a for req in permuted_request) || riszero[i]
+                @infiltrate any( -e(i) ≈ req.a for req in permuted_request) 
+                push!(J[2],i)
+            else
+                push!(J[1],i)
+            end
+        elseif avi.l[i]+tol < z[i] < avi.u[i]-tol && riszero[i] && !equal_bounds[i]
+            if any(-[avi.M[i,:]; avi.N[i,:]] ≈ req.a for req in permuted_request) && !isinf(avi.l[i])
+                @infiltrate
+                push!(J[2], i)
+            elseif any([avi.M[i,:]; avi.N[i,:]] ≈ req.a for req in permuted_request) && !isinf(avi.u[i])
+                @infiltrate
+                push!(J[4], i)
+            else
+                push!(J[3], i)
+            end
+        elseif isapprox(z[i], avi.u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
+            if any( e(i) ≈ req.a for req in permuted_request) || riszero[i]
+                @infiltrate any( e(i) ≈ req.a for req in permuted_request) 
+                push!(J[4], i)
+            else
+                push!(J[5], i)
+            end
+        else
+            @assert equal_bounds[i]
+            push!(J[6], i)
+        end
+    end
+    #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
+    #J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
+    #J[3] = findall( (avi.l.+tol .< z .< avi.u.-tol) .&& riszero .&& .!equal_bounds)
+    #J[4] = findall( isapprox.(z, avi.u; atol=tol) .&& riszero .&& .!equal_bounds)
+    #J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol .&& .!equal_bounds)
+    #J[6] = findall( equal_bounds)
     sum(length.(values(J))) != length(z) && throw(error("Z does not cleanly solve AVI"))
     return J
 end
@@ -647,8 +615,7 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
     avi1 = AVI(gavi.M, gavi.N, gavi.o, gavi.l1, gavi.u1)
     r1 = gavi.M*z+gavi.N*w+gavi.o
     z1 = z[1:length(gavi.o)]
-    J1 = comp_indices(avi1, r1, z1, w; tol)
-    revise_indices!(J1, avi1, premuted_request)
+    J1 = comp_indices(avi1, r1, z1, w, permuted_request; tol)
    
     d1 = length(gavi.o)
     d2 = length(gavi.l2)
@@ -658,8 +625,7 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
     avi2 = AVI(M2, N2, o2, gavi.l2, gavi.u2)
     r2 = M2*z
     s2 = gavi.A*z+gavi.B*w
-    J2 = comp_indices(avi2, r2, s2, w; tol)
-    revise_indices!(J2, avi2, premuted_request)
+    J2 = comp_indices(avi2, r2, s2, w, permuted_request; tol)
 
     J = Dict{Int, Vector{Int}}()
     for (key,value) in J1
@@ -675,8 +641,3 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
     end
     J
 end
-
-function revise_indices!(J, avi, request)
-    nothing
-end
-

@@ -213,9 +213,39 @@ function vectorize(p::Poly)
     u = reduce(vcat, ([s.u,] for s in p))
     rl = reduce(vcat, ([s.rl,] for s in p))
     ru = reduce(vcat, ([s.ru,] for s in p))
-    il = reduce(vcat, ([s.il,] for s in p))
-    iu = reduce(vcat, ([s.iu,] for s in p))
-    (;A,l,u,rl,ru,il,iu)
+    (;A,l,u,rl,ru)
+end
+
+function has_parent(p::BasicPoly, i)
+    false
+end
+function has_parent(p::ProjectedPoly, i)
+    true
+end
+function has_parent(p::IntersectionPoly, i)
+    id = 0
+    for pp in p.polys
+        len = length(pp)
+        if id+1 ≤ i ≤ id+len
+            return has_parent(pp)
+        else
+            id += len
+        end
+    end
+end
+function get_parent(p::ProjectedPoly, i)
+    p.parent
+end
+function get_parent(p::IntersectionPoly, i)
+    id = 0
+    for pp in p.polys
+        len = length(pp)
+        if id+1 ≤ i ≤ id+len
+            return pp.parent
+        else
+            id += len
+        end
+    end
 end
 
 function simplify(p::BasicPoly; tol=1e-6)
