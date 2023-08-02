@@ -10,31 +10,45 @@ Lots of inefficiencies:
     -bottom level should never ignore requests from parent
     -shouldn't have to ignore always, maybe I can assume that only passed if already at optimum
 """
-function solve(qpn::QPNet, x_init, parent_level_request=nothing;
+function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
         level=1,
         rng=MersenneTwister())
-    at_level_request = Set{Linear}()
-    x_opt = x_init
-    while true
-        (; x_opt, Sol, identified_request) = solve_base(qpn, x_opt, at_level_request; level, rng)
-        if isempty(identified_request)
-            break
-        else
-            union!(at_level_request, identified_request)
+
+    x_in = x_init
+    indent = "       "^level
+    req_status = isempty(parent_level_request) ? "is empty" : "is present"
+    @info "$indent Solve call for level $level. Parent level request $req_status."
+
+    if isempty(parent_level_request)
+        at_level_request = Set{Linear}()
+        while true
+            @info "$indent Calling solve_base at level $level. at_level_request is $at_level_request."
+            @info "$indent x before solve is $x_in"
+            (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, at_level_request; level, rng)
+            @info "$indent x after solve is $x_opt"
+            if isempty(identified_request)
+                @info "$indent No new requests were identified. Returning."
+                break
+            else
+                @info "$indent Found some new requests. Going to update at_level_request"
+                union!(at_level_request, identified_request)
+            end
+            x_in = x_opt
         end
-    end
-    if isnothing(parent_level_request)
-        (; x_opt, Sol)
+        return (; x_opt, Sol)
     else
-        (; x_opt, Sol) = solve_base(qpn, x_opt, parent_level_request; request_from_parent=true, level, rng)
+        @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request ($parent_level_request)."
+        @info "$indent x before solve is $x_in"
+        (; x_opt, Sol) = solve_base!(qpn, x_in, parent_level_request; level, rng)
+        @info "$indent x_opt after solve is $x_opt"
+        return (;x_opt, Sol)
     end
 end
 
-function solve_base(qpn::QPNet, x_init, request; 
+function solve_base!(qpn::QPNet, x_init, request; 
         level=1,
-        request_from_parent=false,
         rng=MersenneTwister())
-
+    
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
@@ -62,7 +76,6 @@ function solve_base(qpn::QPNet, x_init, request;
             #x_low = ret_low.x_opt
             x = ret_low.x_opt
             Sol_low = ret_low.Sol
-            req = Set{Linear}()
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
@@ -89,8 +102,8 @@ function solve_base(qpn::QPNet, x_init, request;
                 sub_count += 1
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
-                #try
-                    res = solve_qep(qep, x, req, S_keep, sub_inds;
+                try
+                    res = solve_qep(qep, x, request, S_keep, sub_inds;
                                     qpn.var_indices,
                                     level,
                                     subpiece_index=e,
@@ -113,6 +126,7 @@ function solve_base(qpn::QPNet, x_init, request;
                             end
                         end
                         x .= res.x_opt
+                        empty!(request)
                         all_same = false #TODO should queue all non-solutions?
                         break
                     else
@@ -141,20 +155,20 @@ function solve_base(qpn::QPNet, x_init, request;
                         throw_count += 1
                         continue
                     end
-                #catch e
-                #    err_count += 1
-                #    @infiltrate
-                #    continue
-                #end
+                catch e
+                    err_count += 1
+                    @infiltrate
+                    continue
+                end
             end
 
             if sub_count > 0 && err_count == sub_count
                 error("All subpieces infeasible")
             end
 
-            if !current_infeasible && !low_feasible
-
-                res = solve_qep(qep, x, req, S_keep, sub_inds; qpn.options.high_dimension, qpn.var_indices)
+            if !current_infeasible && !low_feasible && false
+                @info "Shouldn't be here..., why was this logic ever here??"
+                res = solve_qep(qep, x, request, S_keep, sub_inds; qpn.options.high_dimension, qpn.var_indices)
                 diff = norm(x-res.x_opt)
                 qpn.options.debug && println("Diff :", diff)
                 x .= res.x_opt
@@ -177,10 +191,7 @@ function solve_base(qpn::QPNet, x_init, request;
                 end
             end
 
-            @infiltrate
-
             level_dim = length(param_indices(qpn, level))
-            @info "Combining pieces"
             S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=true) : nothing
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?

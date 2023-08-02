@@ -113,7 +113,11 @@ mutable struct LocalGAVISolutions
                        max_vertices=typemax(Int)) = begin
         n = length(z)
         m = length(w)
-        permuted_request = unpermute(request, decision_inds, param_inds)
+        if isempty(request) || length(first(request).a) != n+m
+            permuted_request = Set{Linear}()
+        else
+            permuted_request = unpermute(request, decision_inds, param_inds)
+        end
         J = comp_indices(gavi,z,w,permuted_request)
         Ks = all_Ks(J)
         @debug "There are $(length(Ks)) immediately available pieces of this solution map."
@@ -552,24 +556,20 @@ function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-
     for i = 1:length(z)
         if isapprox(z[i], avi.l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
             if any( -e(i) ≈ req.a for req in permuted_request) || riszero[i]
-                @infiltrate any( -e(i) ≈ req.a for req in permuted_request) 
                 push!(J[2],i)
             else
                 push!(J[1],i)
             end
         elseif avi.l[i]+tol < z[i] < avi.u[i]-tol && riszero[i] && !equal_bounds[i]
             if any(-[avi.M[i,:]; avi.N[i,:]] ≈ req.a for req in permuted_request) && !isinf(avi.l[i])
-                @infiltrate
                 push!(J[2], i)
             elseif any([avi.M[i,:]; avi.N[i,:]] ≈ req.a for req in permuted_request) && !isinf(avi.u[i])
-                @infiltrate
                 push!(J[4], i)
             else
                 push!(J[3], i)
             end
         elseif isapprox(z[i], avi.u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
             if any( e(i) ≈ req.a for req in permuted_request) || riszero[i]
-                @infiltrate any( e(i) ≈ req.a for req in permuted_request) 
                 push!(J[4], i)
             else
                 push!(J[5], i)
