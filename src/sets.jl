@@ -118,9 +118,6 @@ of Slices.
 
 Poly = {x : ∃ yᵢ, l ≤ a'x + b'yᵢ ≤ u for all slices, for all i ∈ secondary}
 """
-#struct Poly
-#    main::Set{Slice}
-#end
 abstract type Poly end
 
 struct BasicPoly <: Poly

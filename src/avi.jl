@@ -316,7 +316,6 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
             if isnothing(S) || !make_requests
                 identified_request = Set{Linear}()
             else
-                @infiltrate level∈[1,2]
                 S_duals = z[S_dual_inds]
                 @assert length(S_duals) == length(S)
                 (; A, l, u) = vectorize(S)

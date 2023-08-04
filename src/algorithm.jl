@@ -29,6 +29,9 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
             @info "$indent x before solve is $x_in"
             (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, at_level_request; level, rng)
             @info "$indent x after solve is $x_opt"
+            if level > 1
+                @info "$indent number of solution pieces is $(length(collect(Sol)))"
+            end
             if isempty(identified_request)
                 @info "$indent No new requests were identified. Returning."
                 break
@@ -40,6 +43,10 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
         end
         return (; x_opt, Sol)
     else
+
+        # TODO I think this needs to iterate, unioning with any new identified
+        # requests (perform after above opts always)
+
         @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request:"
         for req in parent_level_request
             @info "$indent      $req"
@@ -47,6 +54,9 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
         @info "$indent x before solve is $x_in"
         (; x_opt, Sol) = solve_base!(qpn, x_in, parent_level_request; level, rng)
         @info "$indent x_opt after solve is $x_opt"
+        if level > 1
+            @info "$indent number of solution pieces is $(length(collect(Sol)))"
+        end
         return (;x_opt, Sol)
     end
 end
@@ -118,6 +128,7 @@ function solve_base!(qpn::QPNet, x_init, request;
                                     qpn.options.make_requests,
                                     qpn.options.shared_variable_mode,
                                     rng)
+                    @infiltrate level==2
                     set_guide!(res.Sol, z->(z-x)'*(z-x))
                     new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                     better_value_found = new_fair_value < current_fair_value - qpn.options.tol
@@ -199,7 +210,12 @@ function solve_base!(qpn::QPNet, x_init, request;
             end
 
             level_dim = length(param_indices(qpn, level))
-            S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=true) : nothing
+            local S
+            try
+                S = (qpn.options.gen_solution_map || level > 1) ? combine(local_regions, local_solutions, level_dim; show_progress=true) : nothing
+            catch err
+                @infiltrate
+            end
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
             return (; x_opt=x, Sol=S, identified_request)
@@ -217,7 +233,7 @@ where Rᵢ' is the set complement of Rᵢ.
 """
 function combine(regions, solutions, level_dim; show_progress=true)
     if length(solutions) == 0
-        @error "No solutions to combine... length solutions: 0, length regions: $(length(regions))"
+        error("No solutions to combine... length solutions: 0, length regions: $(length(regions))")
     elseif length(solutions) == 1
         PolyUnion(collect(first(solutions)))
     else

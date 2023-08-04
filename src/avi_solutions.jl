@@ -79,13 +79,7 @@ function project_and_permute(S, var_inds, param_inds)
     dp = length(param_inds)
     projection_inds = [collect(1:dv); collect(d-dp+1:d)]
    
-    local piece
-    try
-        piece = project(S, projection_inds)
-    catch err
-        @infiltrate
-    end
-
+    piece = project(S, projection_inds)
     permute!(piece.poly, var_inds, param_inds) 
     permute!(piece.parent, var_inds, param_inds)
 
@@ -388,29 +382,34 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
     if !isempty(gavi_sols.Ks) # if recipes available, process
         @debug "Processing recipe. Length of queue: $(length(gavi_sols.Ks))." 
         K = dequeue!(gavi_sols.Ks)
-        (; piece, exemplar, vertices) = expand(gavi_sols.gavi, 
-                                               gavi_sols.z, 
-                                               gavi_sols.w, 
-                                               K.recipe, 
-                                               gavi_sols.level, 
-                                               gavi_sols.subpiece_index, 
-                                               gavi_sols.decision_inds, 
-                                               gavi_sols.param_inds)
-        fval = permute_eval(gavi_sols.guide, exemplar, gavi_sols.decision_inds, gavi_sols.param_inds)
-        enqueue!(gavi_sols.polys, PolyExemplar(piece, exemplar), fval) 
         push!(gavi_sols.explored_Ks, K.recipe)
-        for v in vertices
-            vert = Vertex(v=v)
-            if vert ∉ gavi_sols.explored_vertices
-                fval = permute_eval(gavi_sols.guide, v, gavi_sols.decision_inds, gavi_sols.param_inds)
-                #enqueue!(gavi_sols.vertex_queue, vert, fval)
-                gavi_sols.vertex_queue[vert] = fval
+        try
+            (; piece, exemplar, vertices) = expand(gavi_sols.gavi, 
+                                                   gavi_sols.z, 
+                                                   gavi_sols.w, 
+                                                   K.recipe, 
+                                                   gavi_sols.level, 
+                                                   gavi_sols.subpiece_index, 
+                                                   gavi_sols.decision_inds, 
+                                                   gavi_sols.param_inds)
+            fval = permute_eval(gavi_sols.guide, exemplar, gavi_sols.decision_inds, gavi_sols.param_inds)
+            enqueue!(gavi_sols.polys, PolyExemplar(piece, exemplar), fval) 
+            for v in vertices
+                vert = Vertex(v=v)
+                if vert ∉ gavi_sols.explored_vertices
+                    fval = permute_eval(gavi_sols.guide, v, gavi_sols.decision_inds, gavi_sols.param_inds)
+                    #enqueue!(gavi_sols.vertex_queue, vert, fval)
+                    gavi_sols.vertex_queue[vert] = fval
+                end
             end
-        end
-        gavi_sol_state = (; exploration_mode = true)
-        if !isempty(piece)
-            return (piece, gavi_sol_state)
-        else
+            gavi_sol_state = (; exploration_mode = true)
+            if !isempty(piece)
+                return (piece, gavi_sol_state)
+            else
+                return Base.iterate(gavi_sols, gavi_sol_state)
+            end
+        catch err
+            gavi_sol_state = (; exploration_mode = true)  
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
     elseif !isempty(gavi_sols.vertex_queue) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
@@ -603,7 +602,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
             push!(J[6], i)
         end
     end
-    @infiltrate num_requests > 0 && num_requests != requests_granted 
+    #@infiltrate num_requests > 0 && num_requests != requests_granted 
     catch err
         @infiltrate
     end

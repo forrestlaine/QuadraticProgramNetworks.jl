@@ -117,7 +117,11 @@ function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
     A = Symbolics.sparsejacobian(cons, qp_net.variables)
     rows,cols,vals = findnz(A)
     n, m = size(A)
-    A = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    try
+        A = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    catch err
+        error("Detected non-linear constraint!")
+    end
     droptol!(A, tol)
 
     vals = map(cons) do con
@@ -138,7 +142,11 @@ function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
     Q = Symbolics.sparsejacobian(grad, qp_net.variables)
     rows,cols,vals = findnz(Q)
     n,m = size(Q)
-    Q = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    try
+        Q = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    catch err
+        error("Detected non-quadratic cost!")
+    end
     q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
     droptol!(Q, tol)
     f = Quadratic(Q, q)
