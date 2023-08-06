@@ -224,7 +224,7 @@ function has_parent(p::IntersectionPoly, i)
     for pp in p.polys
         len = length(pp)
         if id+1 ≤ i ≤ id+len
-            return has_parent(pp)
+            return has_parent(pp, i-id)
         else
             id += len
         end

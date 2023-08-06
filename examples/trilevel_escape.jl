@@ -19,12 +19,12 @@ function setup(; kwargs...)
 
     cons_z1 = [z[1],]
     lb_z1 = [-1.0,]
-    ub_z1 = [0.5,]
+    ub_z1 = [1.0,]
     con_id_z1 = QPN.add_constraint!(qp_net, cons_z1, lb_z1, ub_z1)
 
     cons_z2 = [z[2],]
     lb_z2 = [-0.5,]
-    ub_z2 = [1.0,]
+    ub_z2 = [0.5,]
     con_id_z2 = QPN.add_constraint!(qp_net, cons_z2, lb_z2, ub_z2)
 
     cost_x = y-x
@@ -35,11 +35,11 @@ function setup(; kwargs...)
     level = 2
     QPN.add_qp!(qp_net, level, cost_y, [con_id_y], y)
 
-    cost_z1 = 0.5*(z[1]-x)^2
+    cost_z1 = (z[1]-x)^2
     level = 3
     QPN.add_qp!(qp_net, level, cost_z1, [con_id_z1,], z[1])
     
-    cost_z2 = 0.5*(z[2]-x)^2
+    cost_z2 = (z[2]-x)^2
     level = 3
     QPN.add_qp!(qp_net, level, cost_z2, [con_id_z2,], z[2])
     

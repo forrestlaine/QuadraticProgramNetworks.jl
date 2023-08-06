@@ -313,6 +313,10 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
             # v-enum even required?)
             Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 0) : nothing
             @debug "Solution map generated."
+
+            # TODO : should probably propagate any parent level requests if
+            # they appear in S 
+
             if isnothing(S) || !make_requests
                 identified_request = Set{Linear}()
             else
@@ -339,8 +343,9 @@ end
 function propagate_request(request, poly)
     m = OSQP.Model()
     d = embedded_dim(poly)
+    n = length(request)
     q = zeros(d)
-    q[1:length(request)] = request
+    q[1:n] = request
     (; A, l, u) = vectorize(poly)
     OSQP.setup!(m; q, A, l, u,
                 verbose=false,
@@ -354,12 +359,24 @@ function propagate_request(request, poly)
         for (i, λ) in enumerate(duals)
             if λ ≥ 1e-4
                 push!(prop_requests, Linear(A[i,:]))
+                if iszero(A[i,n+1:end])
+                    # Trick to force low-levels to process request if they are
+                    # responsible
+                    push!(prop_requests, Linear(A[i,1:n]))
+                end
             elseif λ ≤ -1e-4
                 push!(prop_requests, Linear(-A[i,:]))
+                if iszero(A[i,n+1:end])
+                    # Trick to force low-levels to process request if they are
+                    # responsible
+                    push!(prop_requests, Linear(-A[i,1:n]))
+                end
             end
         end
     else
-        @infiltrate
+        # This shouldn't happen (would mean halfspace in projected poly isn't
+        # implied by halfspace in parent poly)
+        throw(error("Unable to propagate request to parent poly for some reason."))
     end
     prop_requests
 end

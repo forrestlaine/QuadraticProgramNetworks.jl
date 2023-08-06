@@ -55,15 +55,18 @@ function permute!(P::Poly, var_inds, param_inds)
     end
 end
 
-function unpermute(request::Set{Linear}, var_inds, param_inds)
+function unpermute(request::Set{Linear}, dim, var_inds, param_inds)
     isempty(request) && return request
     example = first(request)
-    dim = length(example.a)
     dv = length(var_inds)
     dp = length(param_inds)
     extra_inds = setdiff(1:dim, [var_inds; param_inds])
+
+    appropriate_requests = Iterators.filter(request) do req
+        length(req.a) == dim
+    end
  
-    original_request = Iterators.map(request) do req
+    original_request = Iterators.map(appropriate_requests) do req
         a = req.a
         a_orig = zeros(dim)
         a_orig[1:dv] = a[var_inds]
@@ -116,7 +119,7 @@ mutable struct LocalGAVISolutions
         if isempty(request) || length(first(request).a) != n+m
             permuted_request = Set{Linear}()
         else
-            permuted_request = unpermute(request, decision_inds, param_inds)
+            permuted_request = unpermute(request, n+m, decision_inds, param_inds)
         end
         J = comp_indices(gavi,z,w,permuted_request)
         Ks = all_Ks(J)

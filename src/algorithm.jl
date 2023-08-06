@@ -113,7 +113,6 @@ function solve_base!(qpn::QPNet, x_init, request;
                 @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
             local S_keep
-            #@infiltrate level == 1
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
@@ -128,7 +127,6 @@ function solve_base!(qpn::QPNet, x_init, request;
                                     qpn.options.make_requests,
                                     qpn.options.shared_variable_mode,
                                     rng)
-                    @infiltrate level==2
                     set_guide!(res.Sol, z->(z-x)'*(z-x))
                     new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                     better_value_found = new_fair_value < current_fair_value - qpn.options.tol

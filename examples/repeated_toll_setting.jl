@@ -4,10 +4,10 @@ using Infiltrator
 """
 A reactive toll setting problem.
 N = number of toll lane entrances/exits
-0 ≤ p0 ≤ 1 : fraction of traffic in previous toll lane
+0 ≤ p0 ≤ 1 : fraction of traffic in initial toll lane
 0 ≤ p[n] ≤ 1 : fraction of traffic in nth toll lane
 0 ≤ T[n] : the toll price (in standardized units) for traveling in the nth toll lane
-0 ≤ α : the cost factor for significant toll entering/exiting
+0 ≤ α : the cost factor for lane change congestion between toll sections
 0 ≤ D : the extra price (in standardized units) for traveling in any non-toll lane
 
 """
