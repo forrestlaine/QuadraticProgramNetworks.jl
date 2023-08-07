@@ -125,11 +125,12 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{Int}();
+function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decision_inds=Vector{Int}();
                    var_indices=nothing,
                    level=0,
                    subpiece_index=0,
                    debug=false,
+                   request_comes_from_parent=false,
                    high_dimension=false,
                    make_requests=false,
                    gen_sol=true,
@@ -268,14 +269,25 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
     # iterations, need to properly warmstart with previous solution? Might
     # require reducing dimension AFTER psi minimization
 
- 
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
-    (; z, status) = solve_gavi(gavi, z0, w)
 
+    local z
+    try
+        (; z, status) = solve_gavi(gavi, z0, w)
+    catch err
+        relaxable_parent_inds = setdiff(relaxable_inds, decision_inds)
+        if !isempty(relaxable_parent_inds)
+            @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
+            gavi = relax_gavi(gavi, relaxable_parent_inds)
+            (; z, status) = solve_gavi
+            if status != SUCCES
+                error("AVI solve error, even after relaxing indices.")
+            end
+        else
+            error("AVI solve error!")
+        end
+    end
 
-    #status != SUCCESS && @infiltrate
-    status != SUCCESS && @warn "AVI solve error!"
-    status != SUCCESS && error("AVI solve error!")
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if high_dimension
@@ -321,23 +333,42 @@ function solve_qep(qep_base, x, request, S=nothing, shared_decision_inds=Vector{
                 identified_request = Set{Linear}()
             else
                 S_duals = z[S_dual_inds]
-                @assert length(S_duals) == length(S)
-                (; A, l, u) = vectorize(S)
-                identified_request = Linear[]
-                for (i,λ) in enumerate(S_duals)
-                    if λ ≥ 1e-4 && has_parent(S, i)
-                        append!(identified_request, propagate_request(A[i,:], get_parent(S, i)))
-                    elseif λ ≤ -1e-4 && has_parent(S, i)
-                        append!(identified_request, propagate_request(-A[i,:], get_parent(S, i)))
-                    end
-                end
-                identified_request = Set(identified_request)
+                identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
             end
             (; x_opt, Sol, identified_request)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."
         end
     end
+end
+
+function identify_request(S, λs, parent_request; propagate=false)
+    identified_request = Set{Linear}()
+    (; A, l, u) = vectorize(S)
+    (m,d) = size(A)
+
+    if propagate
+        for req in parent_request
+            if iszero(req.a[d+1:end])
+                for i = 1:m
+                    if req.a[1:d] ≈ A[i,:] 
+                        union!(identified_request, propagate_request(A[i,:], get_parent(S, i)))
+                    elseif req.a[1:d] ≈ -A[i,:]
+                        union!(identified_request, propagate_request(-A[i,:], get_parent(S, i)))
+                    end
+                end
+            end
+        end
+    else
+        for (i, λ) in enumerate(λs)
+            if λ ≥ 1e-4 && has_parent(S, i)
+                union!(identified_request, propagate_request(A[i,:], get_parent(S, i)))
+            elseif λ ≤ -1e-4 && has_parent(S, i)
+                union!(identified_request, propagate_request(-A[i,:], get_parent(S, i)))
+            end
+        end
+    end
+    identified_request
 end
 
 function propagate_request(request, poly)
@@ -353,24 +384,14 @@ function propagate_request(request, poly)
                 eps_abs=1e-8,
                 eps_rel=1e-8)
     ret = OSQP.solve!(m)
-    prop_requests = Linear[]
+    prop_requests = Set{Linear}()
     if ret.info.status_val == 1
         duals = -ret.y
         for (i, λ) in enumerate(duals)
             if λ ≥ 1e-4
                 push!(prop_requests, Linear(A[i,:]))
-                if iszero(A[i,n+1:end])
-                    # Trick to force low-levels to process request if they are
-                    # responsible
-                    push!(prop_requests, Linear(A[i,1:n]))
-                end
             elseif λ ≤ -1e-4
                 push!(prop_requests, Linear(-A[i,:]))
-                if iszero(A[i,n+1:end])
-                    # Trick to force low-levels to process request if they are
-                    # responsible
-                    push!(prop_requests, Linear(-A[i,1:n]))
-                end
             end
         end
     else

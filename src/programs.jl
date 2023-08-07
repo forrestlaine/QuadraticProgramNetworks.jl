@@ -216,6 +216,10 @@ function fair_obj(qpn::QPNet, level)
     sum([qpn.qps[i].f for i in qpn.network[level]])
 end
 
+function level_indices(qpn::QPNet, level)
+    reduce(vcat, (qpn.qps[i].var_indices for i in qpn.network[level]))
+end
+
 function sub_indices(qpn::QPNet, level)
     L = length(qpn.network)
     reduce(vcat, (qpn.qps[i].var_indices for l in level+1:L for i in qpn.network[l]))

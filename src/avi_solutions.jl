@@ -56,7 +56,8 @@ function permute!(P::Poly, var_inds, param_inds)
 end
 
 function unpermute(request::Set{Linear}, dim, var_inds, param_inds)
-    isempty(request) && return request
+    isempty(request) && (@info "0 requests";
+                         return request)
     example = first(request)
     dv = length(var_inds)
     dp = length(param_inds)
@@ -65,6 +66,7 @@ function unpermute(request::Set{Linear}, dim, var_inds, param_inds)
     appropriate_requests = Iterators.filter(request) do req
         length(req.a) == dim
     end
+    @info "Number of appropriate requests for this level: $(length(collect(appropriate_requests)))"
  
     original_request = Iterators.map(appropriate_requests) do req
         a = req.a
@@ -116,11 +118,8 @@ mutable struct LocalGAVISolutions
                        max_vertices=typemax(Int)) = begin
         n = length(z)
         m = length(w)
-        if isempty(request) || length(first(request).a) != n+m
-            permuted_request = Set{Linear}()
-        else
-            permuted_request = unpermute(request, n+m, decision_inds, param_inds)
-        end
+        @info " level $level"
+        permuted_request = unpermute(request, n+m, decision_inds, param_inds)
         J = comp_indices(gavi,z,w,permuted_request)
         Ks = all_Ks(J)
         @debug "There are $(length(Ks)) immediately available pieces of this solution map."

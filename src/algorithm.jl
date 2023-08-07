@@ -10,7 +10,7 @@ Lots of inefficiencies:
     -bottom level should never ignore requests from parent
     -shouldn't have to ignore always, maybe I can assume that only passed if already at optimum
 """
-function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
+function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}(), relaxable_inds=Set{Int}();
         level=1,
         rng=MersenneTwister())
 
@@ -21,54 +21,70 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}();
 
     if isempty(parent_level_request)
         at_level_request = Set{Linear}()
+        at_level_inds = Set{Int}()
         while true
             @info "$indent Calling solve_base at level $level. at_level_request is:"
             for req in at_level_request
                 @info "$indent      $req"
             end
             @info "$indent x before solve is $x_in"
-            (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, at_level_request; level, rng)
+            (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, at_level_request, at_level_inds; level, rng)
             @info "$indent x after solve is $x_opt"
             if level > 1
                 @info "$indent number of solution pieces is $(length(collect(Sol)))"
             end
             if isempty(identified_request)
                 @info "$indent No new requests were identified. Returning."
-                break
+                return (; x_opt, Sol)
             else
-                @info "$indent Found some new requests. Going to update at_level_request"
-                union!(at_level_request, identified_request)
+                if x_in ≈ x_opt
+                    @info "$indent Found some new requests. Going to update at_level_request"
+                    union!(at_level_request, identified_request)
+                else
+                    at_level_request = identified_request
+                    x_in = x_opt
+                end
+                at_level_inds = union!(at_level_inds, level_indices(qpn, level))
             end
-            x_in = x_opt
         end
-        return (; x_opt, Sol)
     else
-
         # TODO I think this needs to iterate, unioning with any new identified
         # requests (perform after above opts always)
-
-        @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request:"
-        for req in parent_level_request
-            @info "$indent      $req"
+        while true
+            @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request:"
+            for req in parent_level_request
+                @info "$indent      $req"
+            end
+            @info "$indent x before solve is $x_in"
+            (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, parent_level_request, relaxable_inds; request_comes_from_parent=true, level, rng)
+            @info "$indent x_opt after solve is $x_opt"
+            if level > 1
+                @info "$indent number of solution pieces is $(length(collect(Sol)))"
+            end
+            if !(x_opt ≈ x_in)
+                @info "$indent when trying to satisfy parent request, different solution found. This shouldn't happen. Returning."
+                return (; x_opt, Sol)
+            elseif isempty(identified_request)
+                @info "$indent Remaining requests do not propagate to lower levels. Made best effort to satisfy requests at this level. Returning."
+                return (; x_opt, Sol)
+            else
+                @info "$indent Was able to propagate requests to lower level. Going to update request and resolve at this level (sending found request to lower level)."
+                union!(parent_level_request, identified_request)
+                union!(relaxable_inds, level_indices(qpn, level))
+            end
         end
-        @info "$indent x before solve is $x_in"
-        (; x_opt, Sol) = solve_base!(qpn, x_in, parent_level_request; level, rng)
-        @info "$indent x_opt after solve is $x_opt"
-        if level > 1
-            @info "$indent number of solution pieces is $(length(collect(Sol)))"
-        end
-        return (;x_opt, Sol)
     end
 end
 
-function solve_base!(qpn::QPNet, x_init, request; 
+function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
         level=1,
+        request_comes_from_parent=false,
         rng=MersenneTwister())
     
     if level == num_levels(qpn)
         start = time()
         qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init, request; 
+        (; x_opt, Sol) = solve_qep(qep, x_init, request, relaxable_inds; 
                                    qpn.var_indices,
                                    level,
                                    qpn.options.debug, 
@@ -88,7 +104,7 @@ function solve_base!(qpn::QPNet, x_init, request;
         sub_inds = sub_indices(qpn, level)
 
         for iters in 1:qpn.options.max_iters
-            ret_low = solve(qpn, x, request; level=level+1, rng)
+            ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng)
             x = ret_low.x_opt
             Sol_low = ret_low.Sol
             set_guide!(Sol_low, fair_objective)
@@ -118,10 +134,11 @@ function solve_base!(qpn::QPNet, x_init, request;
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
                 try
-                    res = solve_qep(qep, x, request, S_keep, sub_inds;
+                    res = solve_qep(qep, x, request, relaxable_inds, S_keep, sub_inds;
                                     qpn.var_indices,
                                     level,
                                     subpiece_index=e,
+                                    request_comes_from_parent,
                                     qpn.options.debug,
                                     qpn.options.high_dimension,
                                     qpn.options.make_requests,
