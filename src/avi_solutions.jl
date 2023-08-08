@@ -56,8 +56,7 @@ function permute!(P::Poly, var_inds, param_inds)
 end
 
 function unpermute(request::Set{Linear}, dim, var_inds, param_inds)
-    isempty(request) && (@info "0 requests";
-                         return request)
+    isempty(request) && return request
     example = first(request)
     dv = length(var_inds)
     dp = length(param_inds)
@@ -66,7 +65,6 @@ function unpermute(request::Set{Linear}, dim, var_inds, param_inds)
     appropriate_requests = Iterators.filter(request) do req
         length(req.a) == dim
     end
-    @info "Number of appropriate requests for this level: $(length(collect(appropriate_requests)))"
  
     original_request = Iterators.map(appropriate_requests) do req
         a = req.a
@@ -118,24 +116,24 @@ mutable struct LocalGAVISolutions
                        max_vertices=typemax(Int)) = begin
         n = length(z)
         m = length(w)
-        @info " level $level"
         permuted_request = unpermute(request, n+m, decision_inds, param_inds)
         J = comp_indices(gavi,z,w,permuted_request)
         Ks = all_Ks(J)
         @debug "There are $(length(Ks)) immediately available pieces of this solution map."
-        K = pop!(Ks)
-        (; piece, exemplar, vertices) = expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds)
+        #K = pop!(Ks)
+        #(; piece, exemplar, vertices) = expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds)
         polys = PriorityQueue{PolyExemplar, Float64}()
         vertex_queue = PriorityQueue{Vertex, Float64}()
-        enqueue!(polys, PolyExemplar(piece, exemplar), Inf)
-        for v in vertices
-            enqueue!(vertex_queue, Vertex(v=v), Inf)
-        end
+        #enqueue!(polys, PolyExemplar(piece, exemplar), Inf)
+        #for v in vertices
+        #    enqueue!(vertex_queue, Vertex(v=v), Inf)
+        #end
         queued_Ks = PriorityQueue{RecipeExemplar, Float64}()
         for KK in Ks
             queued_Ks[RecipeExemplar(KK, [z;w])] = Inf
         end
-        explored_Ks = Set{PolyRecipe}((K,))
+        #explored_Ks = Set{PolyRecipe}((K,))
+        explored_Ks = Set{PolyRecipe}()
         explored_vertices = Set{Vertex}()
         guide = (x->Inf)
         new(gavi, z, w, level, subpiece_index, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds, permuted_request)
@@ -335,7 +333,7 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
 
     vertices = []
     exemplar = zeros(n+m)
-    
+   
     piece = project_and_permute(piece, decision_inds, param_inds)
 
     (; piece, exemplar, vertices)
@@ -356,14 +354,19 @@ function Base.eltype(gavi_sols::LocalGAVISolutions)
 end
 
 function Base.iterate(gavi_sols::LocalGAVISolutions)
-    (next, pq_state) = Base.iterate(gavi_sols.polys)
-    @assert !isnothing(next) # gavi_sols should always have at least one piece, including at initialization
-    gavi_sol_state = (; pq_state, exploration_mode = false)
-
-    if !isempty(next.first.poly)
-        return (next.first.poly, gavi_sol_state)
-    else
+    iter_ret = iterate(gavi_sols.polys)
+    if isnothing(iter_ret)
+        gavi_sol_state = (; exploration_mode=true)
         return Base.iterate(gavi_sols, gavi_sol_state)
+    else 
+        (next, pq_state) = iter_ret
+        gavi_sol_state = (; pq_state, exploration_mode = false)
+
+        if !isempty(next.first.poly)
+            return (next.first.poly, gavi_sol_state)
+        else
+            return Base.iterate(gavi_sols, gavi_sol_state)
+        end
     end
 end
 
@@ -565,7 +568,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
     for i = 1:length(z)
         if isapprox(z[i], l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
             if any( -[A[i,:]; B[i,:]] ≈ req.a for req in permuted_request)
-                @info "Request granted :) $(collect(-[A[i,:]; B[i,:]]))"
+                #@info "Request granted :) $(collect(-[A[i,:]; B[i,:]]))"
                 push!(J[2], i)
                 requests_granted += 1
             else
@@ -577,11 +580,11 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
             end
         elseif l[i]+tol < z[i] < u[i]-tol && riszero[i] && !equal_bounds[i]
             if any(-[M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(l[i])
-                @info "Request granted :) $(collect(-[M[i,:]; N[i,:]]))"
+                #@info "Request granted :) $(collect(-[M[i,:]; N[i,:]]))"
                 push!(J[2], i)
                 requests_granted += 1
             elseif any([M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(u[i])
-                @info "Request granted :) $(collect([M[i,:]; N[i,:]]))"
+                #@info "Request granted :) $(collect([M[i,:]; N[i,:]]))"
                 push!(J[4], i)
                 requests_granted += 1
             else
@@ -589,7 +592,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
             end
         elseif isapprox(z[i], u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
             if any( [A[i,:]; B[i,:]] ≈ req.a for req in permuted_request)
-                @info "Request granted :) $(collect([A[i,:]; B[i,:]]))"
+                #@info "Request granted :) $(collect([A[i,:]; B[i,:]]))"
                 push!(J[4], i)
                 requests_granted += 1
             else

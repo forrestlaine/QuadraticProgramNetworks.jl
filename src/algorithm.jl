@@ -18,6 +18,7 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}(), relaxable
     indent = "       "^level
     req_status = isempty(parent_level_request) ? "is empty" : "is present"
     @info "$indent Solve call for level $level. Parent level request $req_status."
+    @info "$indent relaxable inds are $relaxable_inds"
 
     if isempty(parent_level_request)
         at_level_request = Set{Linear}()
@@ -28,14 +29,15 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}(), relaxable
                 @info "$indent      $req"
             end
             @info "$indent x before solve is $x_in"
-            (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, at_level_request, at_level_inds; level, rng)
+            (; x_opt, Sol, identified_request, x_alts) = solve_base!(qpn, x_in, at_level_request, at_level_inds; level, rng)
             @info "$indent x after solve is $x_opt"
             if level > 1
                 @info "$indent number of solution pieces is $(length(collect(Sol)))"
             end
+
             if isempty(identified_request)
                 @info "$indent No new requests were identified. Returning."
-                return (; x_opt, Sol)
+                return (; x_opt, Sol, x_alts)
             else
                 if x_in ≈ x_opt
                     @info "$indent Found some new requests. Going to update at_level_request"
@@ -50,27 +52,28 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}(), relaxable
     else
         # TODO I think this needs to iterate, unioning with any new identified
         # requests (perform after above opts always)
+        r_inds = copy(relaxable_inds)
         while true
             @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request:"
             for req in parent_level_request
                 @info "$indent      $req"
             end
             @info "$indent x before solve is $x_in"
-            (; x_opt, Sol, identified_request) = solve_base!(qpn, x_in, parent_level_request, relaxable_inds; request_comes_from_parent=true, level, rng)
+            (; x_opt, Sol, identified_request, x_alts) = solve_base!(qpn, x_in, parent_level_request, r_inds; request_comes_from_parent=true, level, rng)
             @info "$indent x_opt after solve is $x_opt"
             if level > 1
                 @info "$indent number of solution pieces is $(length(collect(Sol)))"
             end
             if !(x_opt ≈ x_in)
                 @info "$indent when trying to satisfy parent request, different solution found. This shouldn't happen. Returning."
-                return (; x_opt, Sol)
+                return (; x_opt, Sol, x_alts)
             elseif isempty(identified_request)
                 @info "$indent Remaining requests do not propagate to lower levels. Made best effort to satisfy requests at this level. Returning."
-                return (; x_opt, Sol)
+                return (; x_opt, Sol, x_alts)
             else
-                @info "$indent Was able to propagate requests to lower level. Going to update request and resolve at this level (sending found request to lower level)."
+                @info "$indent Was able to propagate requests to lower level (from $level to $(level+1)). Going to update request and resolve at this level (sending found request to lower level)."
                 union!(parent_level_request, identified_request)
-                union!(relaxable_inds, level_indices(qpn, level))
+                union!(r_inds, level_indices(qpn, level))
             end
         end
     end
@@ -95,21 +98,29 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
         fin = time()
         qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
         qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
-        return (; x_opt, Sol, identified_request=Set{Linear}())
+        return (; x_opt, Sol, identified_request=Set{Linear}(), x_alts=Vector{Float64}[])
     else
         x = copy(x_init)
         fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
         qep = gather(qpn, level)
         level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ qp.constraint_indices] for id in keys(qep.constraints))...)
         sub_inds = sub_indices(qpn, level)
+        param_inds = param_indices(qpn, level)
 
         for iters in 1:qpn.options.max_iters
             ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng)
+
             x = ret_low.x_opt
+            w = x[param_inds]
+
             Sol_low = ret_low.Sol
+            x_alts = ret_low.x_alts
+
+                
             set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
+            non_local_xs = Vector{Float64}[]
             local_solutions = [] #Vector{LocalAVISolutions}()
             local_regions = Poly[]
             identified_request = Set{Linear}()
@@ -118,6 +129,28 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             low_feasible = false
             current_fair_value = fair_objective(x)
             current_infeasible = !all( x ∈ qep.constraints[i].poly for i in level_constraint_ids)
+            
+            trying_alt = false
+            for x_alt in x_alts
+                alt_feas = all( x_alt ∈ qep.constraints[i].poly for i in level_constraint_ids)
+                alt_not_worse = fair_objective(x_alt) ≤ current_fair_value + qpn.options.tol
+
+                if alt_not_worse && !alt_feas
+                    @infiltrate
+                end
+                if alt_not_worse && alt_feas # Enforcing feasibility for alternate point -- should check this.
+                    @infiltrate
+                    x = x_alt
+                    empty!(request)
+                    trying_alt = true
+                    break
+                end
+            end
+            if trying_alt
+                @infiltrate level == 1
+                continue
+            end
+
             sub_count = 0
             throw_count = 0
             err_count = 0
@@ -129,6 +162,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
             local S_keep
+            @infiltrate level == 2
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
@@ -148,6 +182,12 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                     new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                     better_value_found = new_fair_value < current_fair_value - qpn.options.tol
                     same_value_found = new_fair_value < current_fair_value + qpn.options.tol
+                    high_level_shift = !(res.x_opt[param_inds] ≈ w)
+            
+                    if high_level_shift
+                        push!(non_local_xs, res.x_opt)
+                        continue
+                    end
 
                     if current_infeasible || better_value_found
                         diff = norm(x-res.x_opt)
@@ -159,7 +199,11 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                             end
                         end
                         x .= res.x_opt
-                        empty!(request)
+
+                        @warn "Just emptied request!"
+                        empty!(request) # TODO Should this happen here? Seems messy with top logic
+
+
                         all_same = false #TODO should queue all non-solutions?
                         break
                     else
@@ -189,8 +233,8 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                         continue
                     end
                 catch err
-                    err_count += 1
                     @infiltrate
+                    err_count += 1
                     continue
                 end
             end
@@ -200,7 +244,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             end
 
             if !current_infeasible && !low_feasible && false
-                @info "Shouldn't be here..., why was this logic ever here??"
+                @warn "Shouldn't be here..., why was this logic ever here??"
                 res = solve_qep(qep, x, request, S_keep, sub_inds; qpn.options.high_dimension, qpn.var_indices)
                 diff = norm(x-res.x_opt)
                 qpn.options.debug && println("Diff :", diff)
@@ -233,7 +277,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             end
             # TODO is it needed to specify which subpieces constituted S, and check
             # consistency in up-network solves?
-            return (; x_opt=x, Sol=S, identified_request)
+            return (; x_opt=x, Sol=S, identified_request, x_alts=non_local_xs)
         end
         error("Can't find solution.")
     end
@@ -256,7 +300,6 @@ function combine(regions, solutions, level_dim; show_progress=true)
         it = 0
         combined = map(zip(solutions, complements)) do (s, rc)
             it += 1
-            @info it
             PolyUnion([collect(s); rc.polys])
         end
         #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]

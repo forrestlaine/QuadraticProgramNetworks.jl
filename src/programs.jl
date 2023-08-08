@@ -19,7 +19,7 @@ struct Quadratic <: Function
 end
 
 function (f::Quadratic)(x::Vector{Float64})
-    0.5*x'*(f.Q*x + f.q)
+    0.5*x'*(f.Q*x)+ x'*f.q
 end
 
 function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
@@ -61,7 +61,7 @@ Base.@kwdef mutable struct QPNetOptions
     high_dimension::Bool=false
     high_dimension_max_iters::Int=10
     make_requests::Bool=true
-    debug::Bool=true
+    debug::Bool=false
     gen_solution_map::Bool=false
 end
 

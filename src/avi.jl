@@ -112,6 +112,24 @@ function convert(gavi::GAVI)
     AVI(M,N,o,l,u)
 end
 
+function relax_gavi(gavi::GAVI, relaxable_inds)
+    param_inds = setdiff(1:size(gavi.N,2), relaxable_inds)
+    d1 = length(gavi.l1)
+    d2 = length(gavi.l2)
+    dr = length(relaxable_inds)
+    M = [spzeros(dr, d1+d2+dr);
+         gavi.N[:,relaxable_inds] gavi.M]
+    N = [spzeros(dr, length(param_inds)); gavi.N[:, param_inds]]
+    o = [zeros(dr); gavi.o]
+    l1 = [fill(-Inf, dr); gavi.l1]
+    u1 = [fill(Inf, dr); gavi.u1]
+
+    A = [gavi.B[:,relaxable_inds] gavi.A]
+    B = gavi.B[:,param_inds]
+
+    GAVI(M,N,o,l1,u1,A,B,gavi.l2,gavi.u2)
+end
+
 function check_avi_solution(avi, z, w; tol=1e-6)
     r = avi.M*z + avi.N*w + avi.o
     r_pos = r .> tol
@@ -189,8 +207,6 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
     offset = N_private_vars + (N_players+1)*N_shared_vars
     S_dual_inds = nothing
     As, A2s, Bs, ls, us = map(constraint_order) do id
-        # TODO make sure that As / A2s accounts for auxiliary variables
-        # properly (should be part of shared vars I think)
         (; A,l,u) = vectorize(qep.constraints[id].poly)
         con_dim = length(l)
         if id == -1
@@ -271,22 +287,28 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
 
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
 
-    local z
-    try
-        (; z, status) = solve_gavi(gavi, z0, w)
-    catch err
+    (; z, status) = solve_gavi(gavi, z0, w)
+    if status != SUCCESS
         relaxable_parent_inds = setdiff(relaxable_inds, decision_inds)
-        if !isempty(relaxable_parent_inds)
+        relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
+        if !isempty(relaxable_parent_inds) && request_comes_from_parent
             @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
-            gavi = relax_gavi(gavi, relaxable_parent_inds)
-            (; z, status) = solve_gavi
-            if status != SUCCES
+            r_gavi = relax_gavi(gavi, relaxable_parent_inds)
+            r_z0 = [w[relaxable_parent_inds]; z0]
+            r_w = w[setdiff(1:length(w), relaxable_parent_inds)]
+            ret = solve_gavi(r_gavi, r_z0, r_w)
+            status = ret.status
+            if status != SUCCESS
                 error("AVI solve error, even after relaxing indices.")
             end
+            l_r = length(relaxable_parent_inds)
+            w[relaxable_parent_inds] = ret.z[1:l_r]
+            z = ret.z[l_r+1:end]
         else
             error("AVI solve error!")
         end
     end
+    
 
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
@@ -320,6 +342,7 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
             @debug "Found solution, now generating solution map (level $(level))"
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
+            x_opt[param_inds] = w
 
             # TODO figure out request structure with vertex expansion (is
             # v-enum even required?)
