@@ -138,6 +138,13 @@ struct LabeledPoly
     labels
 end
 
+function Base.isequal(S1::Poly, S2::Poly)
+    isequal(Set(collect(S1)), Set(collect(S2)))
+end
+function Base.hash(S::Poly, h::UInt)
+    hash(Set(collect(S)), h)
+end
+
 """
 Creates closed Poly from Matrix-Vector representation.
 """
@@ -393,12 +400,12 @@ Get vertices of poly.
 This is probably not efficient for most polys of large size and low implicit dimension.
 """
 function get_verts(p; tol=1e-6)
-    hrep = get_Polyhedron_hrep(p; tol)
-    vrep = Polyhedra.doubledescription(hrep)
-    if length(vrep.points.points) == 0
-        @infiltrate
+    hr = get_Polyhedron_hrep(p; tol)
+    vr = Polyhedra.doubledescription(hr)
+    if length(vr.points.points) == 0
+        error("There should be at least one vertex in a non-empty pointed cone")
     end
-    (; V = vrep.points.points, R = vrep.rays.rays, L = vrep.rays.lines.lines)
+    (; V = vr.points.points, R = vr.rays.rays, L = vr.rays.lines.lines)
 end
 
 """

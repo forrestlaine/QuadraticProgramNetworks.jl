@@ -346,7 +346,7 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
 
             # TODO figure out request structure with vertex expansion (is
             # v-enum even required?)
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 0) : nothing
+            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 1000) : nothing
             @debug "Solution map generated."
 
             # TODO : should probably propagate any parent level requests if

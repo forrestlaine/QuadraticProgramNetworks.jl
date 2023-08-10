@@ -336,8 +336,21 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
     #remaining_inds = setdiff(1:n, reduced_inds)
     #z = z[remaining_inds] 
     #n = length(z)
-
-    #(; V,R,L) = get_verts(simplify(poly_slice(piece, [fill(missing, n); w])))
+    
+    local vertices
+    exemplar = zeros(n+m)
+    if [z;w] ∈ piece
+        slice_recipe = [z[1:nv]; fill(missing, n-nv); w]
+        try
+            (; V,R,L) = get_verts(simplify(poly_slice(piece, slice_recipe)))
+            vertices = [ [z[1:nv]; v; w] for v in V ]
+        catch err
+            @infiltrate
+        end
+    else
+        vertices = [] 
+    end
+    
     #vertices = [ [v; w] for v in V]
     #rays = [ [r.a; zero(w)] for r in R]
     #lines = [ [l.a; zero(w)] for l in L]
@@ -345,8 +358,8 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
     #exemplar = avg_vertex + sum(rays; init=zeros(n+m)) + sum(lines; init=zeros(n+m))
     #@infiltrate exemplar ∉ piece
 
-    vertices = []
-    exemplar = zeros(n+m)
+    #vertices = []
+    #exemplar = zeros(n+m)
    
     piece = project_and_permute(piece, decision_inds, param_inds)
 
@@ -416,9 +429,10 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
             for v in vertices
                 vert = Vertex(v=v)
                 if vert ∉ gavi_sols.explored_vertices
-                    fval = permute_eval(gavi_sols.guide, v, gavi_sols.decision_inds, gavi_sols.param_inds)
-                    #enqueue!(gavi_sols.vertex_queue, vert, fval)
-                    gavi_sols.vertex_queue[vert] = fval
+                    #fval = permute_eval(gavi_sols.guide, v, gavi_sols.decision_inds, gavi_sols.param_inds)
+                    fval = 0.0
+                    enqueue!(gavi_sols.vertex_queue, vert, fval)
+                    #gavi_sols.vertex_queue[vert] = fval
                 end
             end
             gavi_sol_state = (; exploration_mode = true)

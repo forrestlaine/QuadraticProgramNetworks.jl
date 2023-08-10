@@ -6,7 +6,7 @@ function Base.isequal(L1::Linear, L2::Linear)
     isequal(L1.a, L2.a)
 end
 function Base.hash(L::Linear, h::UInt)
-    hash(("hi",L.a))
+    hash(("Linear",L.a), h)
 end
 
 function (f::Linear)(x::Vector{Float64})

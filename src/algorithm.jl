@@ -197,7 +197,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                         end
                         x .= res.x_opt
 
-                        @warn "Just emptied request!"
+                        #@warn "Just emptied request!"
                         empty!(request) # TODO Should this happen here? Seems messy with top logic
 
 
