@@ -616,7 +616,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
             if any([M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(u[i])
                 #@info "Request granted :) $(collect([M[i,:]; N[i,:]]))"
                 push!(J[4], i)
-                mad_req = true
+                made_req = true
                 requests_granted += 1
             end
             if !made_req
