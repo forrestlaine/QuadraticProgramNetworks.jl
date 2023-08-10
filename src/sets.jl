@@ -18,7 +18,7 @@ returns (true iff x is lexico positive, magnitude of first non-zero value)
 function lexico_positive(x::Vector{Float64})
     return (first(x) ≥ 0, abs(first(x)))
 end
-function lexico_positive(x::SparseVector{Float64, Int64})
+function lexico_positive(x::SparseVector)
     (I, V) = findnz(x)
     t = argmin(I)
     return (V[t] ≥ 0, abs(V[t]))

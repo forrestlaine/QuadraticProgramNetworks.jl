@@ -109,6 +109,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
 
         for iters in 1:qpn.options.max_iters
             ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng)
+            @infiltrate length(ret_low.x_alts) > 0
 
             x = ret_low.x_opt
             w = x[param_inds]

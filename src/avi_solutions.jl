@@ -606,14 +606,18 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
                 end
             end
         elseif l[i]+tol < z[i] < u[i]-tol && riszero[i] && !equal_bounds[i]
+            ai = [M[i,:]; N[i,:]]
+            (l_pos, n) = lexico_positive(ai)
+            ai ./= n
+
             made_req = false
-            if any(-[M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(l[i])
+            if any(-ai ≈ req.a for req in permuted_request) && !isinf(l[i])
                 #@info "Request granted :) $(collect(-[M[i,:]; N[i,:]]))"
                 push!(J[2], i)
                 made_req = true
                 requests_granted += 1
             end
-            if any([M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(u[i])
+            if any(ai ≈ req.a for req in permuted_request) && !isinf(u[i])
                 #@info "Request granted :) $(collect([M[i,:]; N[i,:]]))"
                 push!(J[4], i)
                 made_req = true
@@ -640,7 +644,6 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
         end
     end
 
-    #@infiltrate num_requests > 0 && num_requests != requests_granted 
     #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
     #J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
     #J[3] = findall( (avi.l.+tol .< z .< avi.u.-tol) .&& riszero .&& .!equal_bounds)
