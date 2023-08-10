@@ -139,7 +139,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                     @infiltrate
                 end
                 if alt_not_worse && alt_feas # Enforcing feasibility for alternate point -- should check this.
-                    @infiltrate
                     x = x_alt
                     empty!(request)
                     trying_alt = true
@@ -147,7 +146,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 end
             end
             if trying_alt
-                @infiltrate level == 1
                 continue
             end
 
@@ -162,7 +160,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
             local S_keep
-            @infiltrate level == 2
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
@@ -233,7 +230,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                         continue
                     end
                 catch err
-                    @infiltrate
                     err_count += 1
                     continue
                 end

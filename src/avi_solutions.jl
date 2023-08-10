@@ -271,27 +271,41 @@ function all_Ks(J)
     if 7 ∉ keys(J) # J are indices corresponding to GAVI solution
         @error "Method only intended for indices coresponding to GAVI solution"
     end
-    J2 = Set(J[2])
-    J4 = Set(J[4])
-    J8 = Set(J[8])
-    J10 = Set(J[10])
-    Ks = map(Iterators.product(powerset(J[2]),
-                                         powerset(J[4]),
-                                         powerset(J[8]),
-                                         powerset(J[10]))) do (S2, S4, S8, S10)
-        C2 = setdiff(J2, Set(S2)) |> collect
-        C4 = setdiff(J4, Set(S4)) |> collect
-        C8 = setdiff(J8, Set(S8)) |> collect
-        C10 = setdiff(J10, Set(S10)) |> collect
-        Dict(1=>Set([J[1];C2]), 
-             2=>Set([J[3];S2;S4]),
-             3=>Set([J[5];C4]),
-             4=>Set(J[6]),
-             5=>Set([J[7];C8]),
-             6=>Set([J[9];S8;S10]),
-             7=>Set([J[11];C10]),
-             8=>Set(J[12]))
-    end |> Set
+    J24 = J[2] ∩ J[4]
+    J2 = setdiff(J[2], J24)
+    J4 = setdiff(J[4], J24)
+    J810 = J[8] ∩ J[10]
+    J8 = setdiff(J[8], J810)
+    J10 = setdiff(J[10], J810)
+
+    Ks = mapreduce(union, Iterators.product(powerset(J2),
+                               powerset(J4),
+                               powerset(J8),
+                               powerset(J10),
+                               powerset(J24),
+                               powerset(J810))) do (S2, S4, S8, S10, S24, S810)
+        
+        sub_Ks = map(Iterators.product(powerset(S24), powerset(S810))) do (T24, T810)
+
+            C2 = setdiff(J2, S2) |> collect
+            C24 = setdiff(J24, S24) |> collect
+            D24 = setdiff(S24, T24) |> collect
+            C4 = setdiff(J4, S4) |> collect
+            C8 = setdiff(J8, S8) |> collect
+            C810 = setdiff(J810, S810) |> collect
+            D810 = setdiff(S810, T810) |> collect
+            C10 = setdiff(J10, S10) |> collect
+
+            Dict(1=>Set([J[1];C2;C24]), 
+                 2=>Set([J[3];S2;D24;S4]),
+                 3=>Set([J[5];C4;T24]),
+                 4=>Set(J[6]),
+                 5=>Set([J[7];C8;C810]),
+                 6=>Set([J[9];S8;D810;S10]),
+                 7=>Set([J[11];C10;T810]),
+                 8=>Set(J[12]))
+        end |> Set
+    end
 end
 
 function set_guide!(gavi_sols::LocalGAVISolutions, guide)
@@ -564,7 +578,6 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
     d = size(M,2) + size(N,2)
     num_requests = length(permuted_request)
     requests_granted = 0
-    try
     for i = 1:length(z)
         if isapprox(z[i], l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
             if any( -[A[i,:]; B[i,:]] ≈ req.a for req in permuted_request)
@@ -579,15 +592,20 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
                 end
             end
         elseif l[i]+tol < z[i] < u[i]-tol && riszero[i] && !equal_bounds[i]
+            made_req = false
             if any(-[M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(l[i])
                 #@info "Request granted :) $(collect(-[M[i,:]; N[i,:]]))"
                 push!(J[2], i)
+                made_req = true
                 requests_granted += 1
-            elseif any([M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(u[i])
+            end
+            if any([M[i,:]; N[i,:]] ≈ req.a for req in permuted_request) && !isinf(u[i])
                 #@info "Request granted :) $(collect([M[i,:]; N[i,:]]))"
                 push!(J[4], i)
+                mad_req = true
                 requests_granted += 1
-            else
+            end
+            if !made_req
                 push!(J[3], i)
             end
         elseif isapprox(z[i], u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
@@ -607,17 +625,15 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
             push!(J[6], i)
         end
     end
+
     #@infiltrate num_requests > 0 && num_requests != requests_granted 
-    catch err
-        @infiltrate
-    end
     #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
     #J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
     #J[3] = findall( (avi.l.+tol .< z .< avi.u.-tol) .&& riszero .&& .!equal_bounds)
     #J[4] = findall( isapprox.(z, avi.u; atol=tol) .&& riszero .&& .!equal_bounds)
     #J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol .&& .!equal_bounds)
     #J[6] = findall( equal_bounds)
-    sum(length.(values(J))) != length(z) && throw(error("Z does not cleanly solve AVI"))
+    sum(length.(values(J))) < length(z) && throw(error("Z does not cleanly solve AVI"))
     return J
 end
 function comp_indices(avi::AVI, z, w; tol=1e-4)
@@ -650,20 +666,15 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
     @assert length(z) == d1+d2
     m = length(w)
 
-    #avi1 = AVI(gavi.M, gavi.N, gavi.o, gavi.l1, gavi.u1)
     r1 = gavi.M*z+gavi.N*w+gavi.o
     z1 = z[1:d1]
-    
-    #J1 = comp_indices(avi1, r1, z1, w, permuted_request; tol)
     J1 = comp_indices(gavi.M, gavi.N, sparse(I, d1,d1+d2), spzeros(d1,m), gavi.l1, gavi.u1, r1, z1, w, permuted_request; tol)
    
     M2 = [spzeros(d2, d1) sparse(I,d2,d2)]
     N2 = spzeros(d2, length(w))
     o2 = zeros(d2)
-    #avi2 = AVI(M2, N2, o2, gavi.l2, gavi.u2)
     r2 = M2*z
     s2 = gavi.A*z+gavi.B*w
-    #J2 = comp_indices(avi2, r2, s2, w, permuted_request; tol)
     J2 = comp_indices(M2, N2, gavi.A, gavi.B, gavi.l2, gavi.u2, r2, s2, w, permuted_request; tol)
 
     J = Dict{Int, Vector{Int}}()
