@@ -134,7 +134,8 @@ mutable struct LocalGAVISolutions
         end
         #explored_Ks = Set{PolyRecipe}((K,))
         explored_Ks = Set{PolyRecipe}()
-        explored_vertices = Set{Vertex}()
+        v = Vertex(v=[z;w])
+        explored_vertices = Set((v,))
         guide = (x->Inf)
         new(gavi, z, w, level, subpiece_index, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds, permuted_request)
     end
@@ -267,45 +268,55 @@ function max_freedom_K(J)
     K = Dict(1=>K1, 2=>K2, 3=>K3, 4=>K4, 5=>K5, 6=>K6, 7=>K7, 8=>K8)
 end
 
+#function all_Ks(J)
+#    if 7 ∉ keys(J) # J are indices corresponding to GAVI solution
+#        @error "Method only intended for indices coresponding to GAVI solution"
+#    end
+#    J24 = J[2] ∩ J[4]
+#    J2 = setdiff(J[2], J24)
+#    J4 = setdiff(J[4], J24)
+#    J810 = J[8] ∩ J[10]
+#    J8 = setdiff(J[8], J810)
+#    J10 = setdiff(J[10], J810)
+#
+#    Ks = mapreduce(union, Iterators.product(powerset(J2),
+#                               powerset(J4),
+#                               powerset(J8),
+#                               powerset(J10),
+#                               powerset(J24),
+#                               powerset(J810))) do (S2, S4, S8, S10, S24, S810)
+#        
+#        sub_Ks = map(Iterators.product(powerset(S24), powerset(S810))) do (T24, T810)
+#
+#            C2 = setdiff(J2, S2) |> collect
+#            C24 = setdiff(J24, S24) |> collect
+#            D24 = setdiff(S24, T24) |> collect
+#            C4 = setdiff(J4, S4) |> collect
+#            C8 = setdiff(J8, S8) |> collect
+#            C810 = setdiff(J810, S810) |> collect
+#            D810 = setdiff(S810, T810) |> collect
+#            C10 = setdiff(J10, S10) |> collect
+#
+#            Dict(1=>Set([J[1];C2;C24]), 
+#                 2=>Set([J[3];S2;D24;S4]),
+#                 3=>Set([J[5];C4;T24]),
+#                 4=>Set(J[6]),
+#                 5=>Set([J[7];C8;C810]),
+#                 6=>Set([J[9];S8;D810;S10]),
+#                 7=>Set([J[11];C10;T810]),
+#                 8=>Set(J[12]))
+#        end |> Set
+#    end
+#end
+
+"""
+Assume that J is a dict: i=>S ⊂ {1,2,3,4,5,6,7,8,9,10,11,12}
+"""
 function all_Ks(J)
-    if 7 ∉ keys(J) # J are indices corresponding to GAVI solution
-        @error "Method only intended for indices coresponding to GAVI solution"
-    end
-    J24 = J[2] ∩ J[4]
-    J2 = setdiff(J[2], J24)
-    J4 = setdiff(J[4], J24)
-    J810 = J[8] ∩ J[10]
-    J8 = setdiff(J[8], J810)
-    J10 = setdiff(J[10], J810)
-
-    Ks = mapreduce(union, Iterators.product(powerset(J2),
-                               powerset(J4),
-                               powerset(J8),
-                               powerset(J10),
-                               powerset(J24),
-                               powerset(J810))) do (S2, S4, S8, S10, S24, S810)
-        
-        sub_Ks = map(Iterators.product(powerset(S24), powerset(S810))) do (T24, T810)
-
-            C2 = setdiff(J2, S2) |> collect
-            C24 = setdiff(J24, S24) |> collect
-            D24 = setdiff(S24, T24) |> collect
-            C4 = setdiff(J4, S4) |> collect
-            C8 = setdiff(J8, S8) |> collect
-            C810 = setdiff(J810, S810) |> collect
-            D810 = setdiff(S810, T810) |> collect
-            C10 = setdiff(J10, S10) |> collect
-
-            Dict(1=>Set([J[1];C2;C24]), 
-                 2=>Set([J[3];S2;D24;S4]),
-                 3=>Set([J[5];C4;T24]),
-                 4=>Set(J[6]),
-                 5=>Set([J[7];C8;C810]),
-                 6=>Set([J[9];S8;D810;S10]),
-                 7=>Set([J[11];C10;T810]),
-                 8=>Set(J[12]))
-        end |> Set
-    end
+    N = length(J)
+    Ks = map(Iterators.product([J[i] for i = 1:N]...)) do assignment
+        K = Dict(j=>Set(findall(x->x==j, assignment)) for j = 1:8)
+    end |> Set
 end
 
 function set_guide!(gavi_sols::LocalGAVISolutions, guide)
@@ -586,62 +597,45 @@ J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ free}
 """
 #function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
 function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
-    J = Dict(i=>Int[] for i = 1:6)
     equal_bounds = isapprox.(l, u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
     d = size(M,2) + size(N,2)
     num_requests = length(permuted_request)
     requests_granted = 0
+    J = Dict{Int, Set{Int}}()
     for i = 1:length(z)
-        if isapprox(z[i], l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
-            if any( -[A[i,:]; B[i,:]] ≈ req.a for req in permuted_request)
-                #@info "Request granted :) $(collect(-[A[i,:]; B[i,:]]))"
-                push!(J[2], i)
-                requests_granted += 1
-            else
-                if riszero[i]
-                    push!(J[2],i)
-                else
-                    push!(J[1],i)
-                end
-            end
-        elseif l[i]+tol < z[i] < u[i]-tol && riszero[i] && !equal_bounds[i]
-            ai = [M[i,:]; N[i,:]]
-            (l_pos, n) = lexico_positive(ai)
-            ai ./= n
 
-            made_req = false
-            if any(-ai ≈ req.a for req in permuted_request) && !isinf(l[i])
-                #@info "Request granted :) $(collect(-[M[i,:]; N[i,:]]))"
-                push!(J[2], i)
-                made_req = true
-                requests_granted += 1
+        Ji = Int[]
+
+        a1 = -[A[i,:]; B[i,:]]
+        (l_pos, n) = lexico_positive(a1)
+        a1 ./ n
+        a2 = -[M[i,:]; B[i,:]]
+        (l_pos, n) = lexico_positive(a2)
+        a2 ./ n
+        a3 = -a2
+        a4 = -a1
+
+        for (a, j) in zip((a1,a2,a3,a4), (2,1,3,2))
+            if any(a ≈ req.a for req in permuted_request)
+                push!(Ji, j)
             end
-            if any(ai ≈ req.a for req in permuted_request) && !isinf(u[i])
-                #@info "Request granted :) $(collect([M[i,:]; N[i,:]]))"
-                push!(J[4], i)
-                made_req = true
-                requests_granted += 1
-            end
-            if !made_req
-                push!(J[3], i)
-            end
-        elseif isapprox(z[i], u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
-            if any( [A[i,:]; B[i,:]] ≈ req.a for req in permuted_request)
-                #@info "Request granted :) $(collect([A[i,:]; B[i,:]]))"
-                push!(J[4], i)
-                requests_granted += 1
-            else
-                if riszero[i]
-                    push!(J[4], i)
-                else
-                    push!(J[5], i)
-                end
-            end
-        else
-            @assert equal_bounds[i]
-            push!(J[6], i)
         end
+
+        if isapprox(z[i], l[i]; atol=tol) && r[i] ≥ -tol && !equal_bounds[i]
+            push!(Ji,1)
+        end
+        if l[i]-tol ≤ z[i] ≤ u[i]+tol && riszero[i] && !equal_bounds[i]
+            push!(Ji,2)
+        end
+        if isapprox(z[i], u[i]; atol=tol) && r[i] ≤ tol && !equal_bounds[i]
+            push!(Ji,3)
+        end
+        if isempty(Ji)
+            @assert equal_bounds[i]
+            push!(Ji, 4)
+        end
+        J[i] = Set(Ji)
     end
 
     #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
@@ -650,7 +644,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
     #J[4] = findall( isapprox.(z, avi.u; atol=tol) .&& riszero .&& .!equal_bounds)
     #J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol .&& .!equal_bounds)
     #J[6] = findall( equal_bounds)
-    sum(length.(values(J))) < length(z) && throw(error("Z does not cleanly solve AVI"))
+    #sum(length.(values(J))) < length(z) && throw(error("Z does not cleanly solve AVI"))
     return J
 end
 function comp_indices(avi::AVI, z, w; tol=1e-4)
@@ -685,7 +679,7 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
 
     r1 = gavi.M*z+gavi.N*w+gavi.o
     z1 = z[1:d1]
-    J1 = comp_indices(gavi.M, gavi.N, sparse(I, d1,d1+d2), spzeros(d1,m), gavi.l1, gavi.u1, r1, z1, w, permuted_request; tol)
+    J1 = comp_indices(gavi.M, gavi.N, sparse(1.0I, d1,d1+d2), spzeros(d1,m), gavi.l1, gavi.u1, r1, z1, w, permuted_request; tol)
    
     M2 = [spzeros(d2, d1) sparse(I,d2,d2)]
     N2 = spzeros(d2, length(w))
@@ -694,17 +688,25 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
     s2 = gavi.A*z+gavi.B*w
     J2 = comp_indices(M2, N2, gavi.A, gavi.B, gavi.l2, gavi.u2, r2, s2, w, permuted_request; tol)
 
-    J = Dict{Int, Vector{Int}}()
-    for (key,value) in J1
+    J = Dict{Int, Set{Int}}()
+    for (key, value) in J1
         J[key] = value
     end
     for (key, value) in J2
-        J[key+6] = value .+ d1
+        J[key+d1] = Set(value .+ 4)
     end
-    for i = 1:length(z)
-        if !any(i ∈ J[j] for j in 1:12)
-            @infiltrate
-        end
-    end
+
+    #J = Dict{Int, Vector{Int}}()
+    #for (key,value) in J1
+    #    J[key] = value
+    #end
+    #for (key, value) in J2
+    #    J[key+6] = value .+ d1
+    #end
+    #for i = 1:length(z)
+    #    if !any(i ∈ J[j] for j in 1:12)
+    #        @infiltrate
+    #    end
+    #end
     J
 end

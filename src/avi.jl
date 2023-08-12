@@ -78,8 +78,8 @@ function find_closest_feasible!(gavi, z0, w)
     ret = OSQP.solve!(model)
     if ret.info.status_val == 1
         z0 .= ret.x
-    else
-        @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
+    #else
+        #@warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
     end
 end
 
