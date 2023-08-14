@@ -27,6 +27,11 @@ include("avi.jl")
 include("avi_solutions.jl")
 include("printing.jl")
 
-export Poly, QP, Constraint, Quadratic, QPNet, solve
+include("../examples/bilevel_escape.jl")
+include("../examples/trilevel_escape.jl")
+include("../examples/repeated_variable_control.jl")
+include("../examples/simple_bilevel.jl")
+
+export Poly, QP, Constraint, Quadratic, QPNet, solve, setup
 
 end # module QPN

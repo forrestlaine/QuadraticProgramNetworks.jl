@@ -378,20 +378,21 @@ NOTE assumes that p is a closed polyhedron.
 """
 function get_Polyhedron_hrep(p::Poly; tol=1e-6)
 
-    hrep_poly = mapfoldl(∩, p) do s
-        cons = []
-        if isapprox(s.l, s.u; atol=tol)
-            push!(cons, Polyhedra.HyperPlane(s.a, s.u))
+    hyperplanes = Polyhedra.HyperPlane{Float64, SparseVector{Float64, Int64}}[]
+    halfspaces = Polyhedra.HalfSpace{Float64, SparseVector{Float64, Int64}}[]
+    for s in p
+        if isapprox(s.l, s.u; atol=tol) 
+            push!(hyperplanes, Polyhedra.HyperPlane(s.a, s.u))
         else
             if !isinf(s.l)
-                push!(cons, Polyhedra.HalfSpace(-s.a, -s.l))
+                push!(halfpsaces, Polyhedra.HalfSpace(-s.a, -s.l))
             end
             if !isinf(s.u)
-                push!(cons, Polyhedra.HalfSpace(s.a, s.u))
+                push!(halfspaces, Polyhedra.HalfSpace(s.a, s.u))
             end
         end
-        foldl(∩, cons)
     end
+    hr = Polyhedra.hrep(hyperplanes, halfspaces)
 end
 
 """

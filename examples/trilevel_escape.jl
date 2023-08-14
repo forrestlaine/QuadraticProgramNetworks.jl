@@ -1,6 +1,4 @@
-using QPN
-
-function setup(; kwargs...)
+function setup(::Val{:trilevel_escape}; kwargs...)
     x = QPN.variable(:x) 
     y = QPN.variable(:y) 
     z = QPN.variables(:z, 1:2)

@@ -1,6 +1,6 @@
 using QPN
 
-function setup(; kwargs...)
+function setup(::Val{:bilevel_escape}; kwargs...)
     x = QPN.variables(:x, 1:2) 
     y = QPN.variables(:y, 1:2) 
 

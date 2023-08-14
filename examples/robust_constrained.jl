@@ -108,7 +108,7 @@ function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
     display(f) 
 end
 
-function setup(; T=5,
+function setup(::Val{:robust_constrained}; T=5,
                  num_obj=1,
                  num_obj_faces=4,
                  obstacle_spacing = 1.0,

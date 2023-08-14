@@ -11,7 +11,7 @@ N = number of toll lane entrances/exits
 0 ≤ D : the extra price (in standardized units) for traveling in any non-toll lane
 
 """
-function setup(; N=2, D=0.0, p0=0.5, α=0.1, kwargs...)
+function setup(::Val{:repeated_toll_setting}; N=2, D=0.0, p0=0.5, α=0.1, kwargs...)
     T = QPN.variables(:T, 1:N)
     P = QPN.variables(:P, 1:N)
 
