@@ -385,7 +385,7 @@ function get_Polyhedron_hrep(p::Poly; tol=1e-6)
             push!(hyperplanes, Polyhedra.HyperPlane(s.a, s.u))
         else
             if !isinf(s.l)
-                push!(halfpsaces, Polyhedra.HalfSpace(-s.a, -s.l))
+                push!(halfspaces, Polyhedra.HalfSpace(-s.a, -s.l))
             end
             if !isinf(s.u)
                 push!(halfspaces, Polyhedra.HalfSpace(s.a, s.u))

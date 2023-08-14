@@ -453,6 +453,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
                 return Base.iterate(gavi_sols, gavi_sol_state)
             end
         catch err
+            @infiltrate
             gavi_sol_state = (; exploration_mode = true)  
             return Base.iterate(gavi_sols, gavi_sol_state)
         end

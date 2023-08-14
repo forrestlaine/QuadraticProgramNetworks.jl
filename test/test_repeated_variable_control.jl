@@ -3,7 +3,7 @@ using Random
 using SparseArrays
 
 @testset "repeated_variable_control" begin
-    (; qp_net, Q, q, A, l, u) = setup(Val(:repeated_variable_control); make_requests=false)
+    (; qp_net, Q, q, A, l, u) = setup(Val(:repeated_variable_control); make_requests=true)
     ret = solve(qp_net, zeros(length(qp_net.variables)))
     
     mod = OSQP.Model()
