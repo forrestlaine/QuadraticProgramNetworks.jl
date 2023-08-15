@@ -17,30 +17,30 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}(), relaxable
     x_in = x_init
     indent = "       "^level
     req_status = isempty(parent_level_request) ? "is empty" : "is present"
-    @info "$indent Solve call for level $level. Parent level request $req_status."
-    @info "$indent relaxable inds are $relaxable_inds"
+    qpn.options.debug && @info "$indent Solve call for level $level. Parent level request $req_status."
+    qpn.options.debug && @info "$indent relaxable inds are $relaxable_inds"
 
     if isempty(parent_level_request)
         at_level_request = Set{Linear}()
         at_level_inds = Set{Int}()
         while true
-            @info "$indent Calling solve_base at level $level. at_level_request is:"
+            qpn.options.debug && @info "$indent Calling solve_base at level $level. at_level_request is:"
             for req in at_level_request
-                @info "$indent      $req"
+                qpn.options.debug && @info "$indent      $req"
             end
-            @info "$indent x before solve is $x_in"
+            qpn.options.debug && @info "$indent x before solve is $x_in"
             (; x_opt, Sol, identified_request, x_alts) = solve_base!(qpn, x_in, at_level_request, at_level_inds; level, rng)
-            @info "$indent x after solve is $x_opt"
+            qpn.options.debug && @info "$indent x after solve is $x_opt"
             if level > 1
-                @info "$indent number of solution pieces is $(length(collect(Sol)))"
+                qpn.options.debug && @info "$indent number of solution pieces is $(length(collect(Sol)))"
             end
 
             if isempty(identified_request)
-                @info "$indent No new requests were identified. Returning."
+                qpn.options.debug && @info "$indent No new requests were identified. Returning."
                 return (; x_opt, Sol, x_alts)
             else
                 if x_in ≈ x_opt
-                    @info "$indent Found some new requests. Going to update at_level_request"
+                    qpn.options.debug && @info "$indent Found some new requests. Going to update at_level_request"
                     union!(at_level_request, identified_request)
                 else
                     at_level_request = identified_request
@@ -54,24 +54,24 @@ function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}(), relaxable
         # requests (perform after above opts always)
         r_inds = copy(relaxable_inds)
         while true
-            @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request:"
+            qpn.options.debug && @info "$indent Calling FINAL solve_base at level $level. at_level_request is now parent_level_request:"
             for req in parent_level_request
-                @info "$indent      $req"
+                qpn.options.debug && @info "$indent      $req"
             end
-            @info "$indent x before solve is $x_in"
+            qpn.options.debug && @info "$indent x before solve is $x_in"
             (; x_opt, Sol, identified_request, x_alts) = solve_base!(qpn, x_in, parent_level_request, r_inds; request_comes_from_parent=true, level, rng)
-            @info "$indent x_opt after solve is $x_opt"
+            qpn.options.debug && @info "$indent x_opt after solve is $x_opt"
             if level > 1
-                @info "$indent number of solution pieces is $(length(collect(Sol)))"
+                qpn.options.debug && @info "$indent number of solution pieces is $(length(collect(Sol)))"
             end
             if !(x_opt ≈ x_in)
-                @info "$indent when trying to satisfy parent request, different solution found. This shouldn't happen. Returning."
+                qpn.options.debug && @info "$indent when trying to satisfy parent request, different solution found. This shouldn't happen. Returning."
                 return (; x_opt, Sol, x_alts)
             elseif isempty(identified_request)
-                @info "$indent Remaining requests do not propagate to lower levels. Made best effort to satisfy requests at this level. Returning."
+                qpn.options.debug && @info "$indent Remaining requests do not propagate to lower levels. Made best effort to satisfy requests at this level. Returning."
                 return (; x_opt, Sol, x_alts)
             else
-                @info "$indent Was able to propagate requests to lower level (from $level to $(level+1)). Going to update request and resolve at this level (sending found request to lower level)."
+                qpn.options.debug && @info "$indent Was able to propagate requests to lower level (from $level to $(level+1)). Going to update request and resolve at this level (sending found request to lower level)."
                 union!(parent_level_request, identified_request)
                 union!(r_inds, level_indices(qpn, level))
             end
@@ -109,7 +109,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
 
         for iters in 1:qpn.options.max_iters
             ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng)
-
+            
             x = ret_low.x_opt
             w = x[param_inds]
 
@@ -139,7 +139,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                     @infiltrate
                 end
                 if alt_not_worse && alt_feas # Enforcing feasibility for alternate point -- should check this.
-                    @infiltrate
                     x = x_alt
                     empty!(request)
                     trying_alt = true
@@ -161,7 +160,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 @info "     About to reason about potentially $(potential_length(Sol_low)) pieces (maybe many more, see lower-level logs)."
             end    
             local S_keep
-            @infiltrate
             for (e, S) in enumerate(distinct(Sol_low))
                 sub_count += 1
                 S_keep = simplify(S)
@@ -197,7 +195,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                                 @info "      Better value found ($new_fair_value vs $current_fair_value)! Breaking."
                             end
                         end
-                        @infiltrate
                         x .= res.x_opt
 
                         #@warn "Just emptied request!"

@@ -292,7 +292,7 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
         relaxable_parent_inds = setdiff(relaxable_inds, decision_inds)
         relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
         if !isempty(relaxable_parent_inds) && request_comes_from_parent
-            @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
+            debug && @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
             r_gavi = relax_gavi(gavi, relaxable_parent_inds)
             r_z0 = [w[relaxable_parent_inds]; z0]
             r_w = w[setdiff(1:length(w), relaxable_parent_inds)]

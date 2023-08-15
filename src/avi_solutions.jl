@@ -453,7 +453,6 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
                 return Base.iterate(gavi_sols, gavi_sol_state)
             end
         catch err
-            @infiltrate
             gavi_sol_state = (; exploration_mode = true)  
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
@@ -587,6 +586,9 @@ function local_piece(gavi::GAVI, n, m, K, level, subpiece_index; reducible_inds=
 end
 
 """
+
+TODO update this signature
+
 Form dictionary of index sets:
 r = Mz+Nw+o
 J[1] = {i : lᵢ = zᵢ     , rᵢ > 0 }
@@ -608,17 +610,23 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
 
         Ji = Int[]
 
-        a1 = -[A[i,:]; B[i,:]]
-        (l_pos, n) = lexico_positive(a1)
-        a1 ./ n
-        a2 = -[M[i,:]; B[i,:]]
-        (l_pos, n) = lexico_positive(a2)
-        a2 ./ n
-        a3 = -a2
-        a4 = -a1
+        a1 = -[A[i,:]; B[i,:]] # want to increase zᵢ
+        a2 = -[M[i,:]; B[i,:]] # want to increase rᵢ
+        try
+            (l_pos, n) = lexico_positive(a1)
+            a1 ./ n
+        catch err
+        end
+        try
+            (l_pos, n) = lexico_positive(a2)
+            a2 ./ n
+        catch err
+        end
+        a3 = -a2 # want to decrease rᵢ
+        a4 = -a1 # want to decrease zᵢ
 
-        for (a, j) in zip((a1,a2,a3,a4), (2,1,3,2))
-            if any(a ≈ req.a for req in permuted_request)
+        for (a, j, b) in zip((a1,a2,a3,a4), (2,1,3,2), (0.0, l[i], u[i], 0.0))
+            if !isinf(b) && any(a ≈ req.a for req in permuted_request)
                 push!(Ji, j)
             end
         end
@@ -696,18 +704,5 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
     for (key, value) in J2
         J[key+d1] = Set(value .+ 4)
     end
-
-    #J = Dict{Int, Vector{Int}}()
-    #for (key,value) in J1
-    #    J[key] = value
-    #end
-    #for (key, value) in J2
-    #    J[key+6] = value .+ d1
-    #end
-    #for i = 1:length(z)
-    #    if !any(i ∈ J[j] for j in 1:12)
-    #        @infiltrate
-    #    end
-    #end
     J
 end

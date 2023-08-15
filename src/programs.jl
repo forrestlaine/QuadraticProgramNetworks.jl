@@ -108,6 +108,15 @@ function get_flat_initialization(qpn::QPNet; x0 = zeros(length(qpn.variables)))
     ret.x_opt
 end
 
+"""
+Convenience wrapper for setting up example problems. 
+Usually not a good idea to abuse value types like this but
+okay since these are not time-critical calls.
+"""
+function setup(sym::Symbol; kwargs...)
+    setup(Val(sym); kwargs...)
+end
+
 variables(name, dims...) = Symbolics.variables(name, dims...)
 variable(name) = Symbolics.variable(name)
 
