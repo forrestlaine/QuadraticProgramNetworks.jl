@@ -113,8 +113,8 @@ Convenience wrapper for setting up example problems.
 Usually not a good idea to abuse value types like this but
 okay since these are not time-critical calls.
 """
-function setup(sym::Symbol; kwargs...)
-    setup(Val(sym); kwargs...)
+function setup(sym::Symbol; args...)
+    setup(Val(sym); args...)
 end
 
 variables(name, dims...) = Symbolics.variables(name, dims...)

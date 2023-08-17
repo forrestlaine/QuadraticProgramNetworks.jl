@@ -1,7 +1,6 @@
 using StaticArrays
 using Infiltrator
 using QPN
-using GLMakie
 
 struct PolyObject{D, T}
     # Assumed clockwise ordering
@@ -57,56 +56,56 @@ function unpack(x; num_obj=2, T=5, num_obj_faces=4)
 end
 
 
-function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
-
-    N = length(x)
-    num_obj = 0
-    T = 0
-    for k = 1:5
-        try 
-            T = Int((N-7-k*2) / ((num_obj_faces+1)*k+6))
-            num_obj = k
-            break
-        catch e
-            continue
-        end
-    end
-    if T == 0
-        throw(error("Can't identify values of T and num_obj"))
-    end
-
-    f = Figure()
-    f = Figure(resolution=(1440,1440))
-    ax = f[1, 1] = Axis(f, aspect = DataAspect())
-    xlims!(ax, -4.0, 12.0)
-    ylims!(ax, -8.0, 8.0)
-
-    lines!(ax, [-4.0, 12], [-lane_width/2, -lane_width/2], color=:black)
-    lines!(ax, [-4.0, 12], [lane_width/2, lane_width/2], color=:black)
-
-
-
-    vals = unpack(x; num_obj, T, num_obj_faces)
-
-    p = Circle(Point(vals.X0[1:2]...), 0.1f0)
-    scatter!(ax, p, color=:green)
-
-    for i = 1:num_obj
-        verts = map(1:num_obj_faces) do j
-            θ = j*2π / num_obj_faces    
-            SVector(vals.O[i][1]+cos(θ), vals.O[i][2]+sin(θ))
-        end
-        push!(verts, verts[1])
-        lines!(ax, verts, color=:red)
-    end
-
-    for t = 1:T
-        xt = vals.X[t]
-        p = Circle(Point(xt[1:2]...), 0.1f0)
-        scatter!(ax, p, color=:blue)
-    end
-    display(f) 
-end
+#function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
+#
+#    N = length(x)
+#    num_obj = 0
+#    T = 0
+#    for k = 1:5
+#        try 
+#            T = Int((N-7-k*2) / ((num_obj_faces+1)*k+6))
+#            num_obj = k
+#            break
+#        catch e
+#            continue
+#        end
+#    end
+#    if T == 0
+#        throw(error("Can't identify values of T and num_obj"))
+#    end
+#
+#    f = Figure()
+#    f = Figure(resolution=(1440,1440))
+#    ax = f[1, 1] = Axis(f, aspect = DataAspect())
+#    xlims!(ax, -4.0, 12.0)
+#    ylims!(ax, -8.0, 8.0)
+#
+#    lines!(ax, [-4.0, 12], [-lane_width/2, -lane_width/2], color=:black)
+#    lines!(ax, [-4.0, 12], [lane_width/2, lane_width/2], color=:black)
+#
+#
+#
+#    vals = unpack(x; num_obj, T, num_obj_faces)
+#
+#    p = Circle(Point(vals.X0[1:2]...), 0.1f0)
+#    scatter!(ax, p, color=:green)
+#
+#    for i = 1:num_obj
+#        verts = map(1:num_obj_faces) do j
+#            θ = j*2π / num_obj_faces    
+#            SVector(vals.O[i][1]+cos(θ), vals.O[i][2]+sin(θ))
+#        end
+#        push!(verts, verts[1])
+#        lines!(ax, verts, color=:red)
+#    end
+#
+#    for t = 1:T
+#        xt = vals.X[t]
+#        p = Circle(Point(xt[1:2]...), 0.1f0)
+#        scatter!(ax, p, color=:blue)
+#    end
+#    display(f) 
+#end
 
 function setup(::Val{:robust_constrained}; T=5,
                  num_obj=1,

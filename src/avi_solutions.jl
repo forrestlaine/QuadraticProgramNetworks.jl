@@ -117,7 +117,9 @@ mutable struct LocalGAVISolutions
         m = length(w)
         permuted_request = unpermute(request, n+m, decision_inds, param_inds)
         J = comp_indices(gavi,z,w,permuted_request)
+        @infiltrate
         Ks = all_Ks(J)
+        @infiltrate
         @debug "There are $(length(Ks)) immediately available pieces of this solution map." 
         polys = Set{Poly}()
         explored_Ks = Set{PolyRecipe}()
@@ -204,7 +206,9 @@ Assume that J is a dict: i=>S ⊂ {1,2,3,4,5,6,7,8,9,10,11,12}
 """
 function all_Ks(J)
     N = length(J)
-    Ks = map(Iterators.product([J[i] for i = 1:N]...)) do assignment
+    It = Iterators.product([J[i] for i = 1:N]...)
+    @infiltrate
+    Ks = map(It) do assignment
         K = Dict(j=>Set(findall(x->x==j, assignment)) for j = 1:8)
     end |> Set
 end

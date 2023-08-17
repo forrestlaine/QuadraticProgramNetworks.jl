@@ -313,6 +313,7 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if high_dimension
+        throw(error("High dimension mode not supported at the moment"))
         extra_rounds = level==1 ? 0 : 5
         z_orig = z
         (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,level,subpiece_index,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
@@ -342,6 +343,7 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
             x_opt[param_inds] = w
+            @infiltrate
 
             # TODO figure out request structure with vertex expansion (is
             # v-enum even required?)
