@@ -95,13 +95,12 @@ mutable struct LocalGAVISolutions
     w::Vector{Float64}
     level::Int
     subpiece_index::Int
-    guide::Function
-    vertex_queue::PriorityQueue{Vertex, Float64}
-    Ks::PriorityQueue{RecipeExemplar, Float64}
+    unexplored_Ks::Set{PolyRecipe}
+    explored_Ks::Set{PolyRecipe}
+    unexplored_vertices::Set{Vertex}
     explored_vertices::Set{Vertex}
     max_vertices::Int
-    explored_Ks::Set{PolyRecipe}
-    polys::PriorityQueue{PolyExemplar, Float64}
+    polys::Set{Poly}
     decision_inds::Vector{Int}
     param_inds::Vector{Int}
     permuted_request::Set{Linear}
@@ -119,25 +118,13 @@ mutable struct LocalGAVISolutions
         permuted_request = unpermute(request, n+m, decision_inds, param_inds)
         J = comp_indices(gavi,z,w,permuted_request)
         Ks = all_Ks(J)
-        @debug "There are $(length(Ks)) immediately available pieces of this solution map."
-        #K = pop!(Ks)
-        #(; piece, exemplar, vertices) = expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds)
-        polys = PriorityQueue{PolyExemplar, Float64}()
-        vertex_queue = PriorityQueue{Vertex, Float64}()
-        #enqueue!(polys, PolyExemplar(piece, exemplar), Inf)
-        #for v in vertices
-        #    enqueue!(vertex_queue, Vertex(v=v), Inf)
-        #end
-        queued_Ks = PriorityQueue{RecipeExemplar, Float64}()
-        for KK in Ks
-            queued_Ks[RecipeExemplar(KK, [z;w])] = Inf
-        end
-        #explored_Ks = Set{PolyRecipe}((K,))
+        @debug "There are $(length(Ks)) immediately available pieces of this solution map." 
+        polys = Set{Poly}()
         explored_Ks = Set{PolyRecipe}()
+        vertex_queue = Set{Vertex}()
         v = Vertex(v=[z;w])
         explored_vertices = Set((v,))
-        guide = (x->Inf)
-        new(gavi, z, w, level, subpiece_index, guide, vertex_queue, queued_Ks, explored_vertices, max_vertices, explored_Ks, polys, decision_inds, param_inds, permuted_request)
+        new(gavi, z, w, level, subpiece_index, Ks, explored_Ks, vertex_queue, explored_vertices, max_vertices, polys, decision_inds, param_inds, permuted_request)
     end
 end
 
@@ -211,103 +198,6 @@ function get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, p
     (; piece, x_opt=x, reduced_inds, z)
 end
 
-"""
-K[1] : J1 ∪ J2a
-K[2] : J2b ∪ J3 ∪ J4a
-K[3] : J4b ∪ J5
-K[4] : J6
-
-IF J[7-12] exist:
-
-K[5] : J7 ∪ J8a
-K[6] : J8b ∪ J9 ∪ J10a
-K[7] : J10b ∪ J11
-K[8] : J12
-
-Jia/Jib is random partitioning of Ji
-"""
-function random_K(J, rng)
-    n2 = length(J[2])
-    n4 = length(J[4])
-    i2 = rand(rng, Bool, n2)
-    i4 = rand(rng, Bool, n4)
-    K1 = Set([J[1]; [j for (i, j) in zip(i2, J[2]) if i]])
-    K2 = Set([J[3]; [j for (i, j) in zip(i2, J[2]) if !i]; [j for (i, j) in zip(i4, J[4]) if !i]])
-    K3 = Set([J[5]; [j for (i, j) in zip(i4, J[4]) if i]])
-    K4 = Set(J[6])
-    K = Dict(1=>K1, 2=>K2, 3=>K3, 4=>K4)
-
-    if 7 ∈ keys(J) # J are indices corresponding to GAVI solution
-        n8 = length(J[8])
-        n10 = length(J[10])
-        i8 = rand(rng, Bool, n8)
-        i10 = rand(rng, Bool, n10)
-        K[5] = Set([J[7]; [j for (i, j) in zip(i8, J[8]) if i]])
-        K[6] = Set([J[9]; [j for (i, j) in zip(i8, J[8]) if !i]; [j for (i, j) in zip(i10, J[10]) if !i]])
-        K[7] = Set([J[11]; [j for (i, j) in zip(i10, J[10]) if i]])
-        K[8] = Set(J[12])
-    end
-    K
-end
-
-
-"""
-Finds piece that has maximal primal freedom, i.e. 
-l1 < z1 < u1
-l2 < Az+Bw < u2
-"""
-function max_freedom_K(J)
-    K1 = J[1]
-    K2 = J[2]∪ J[3] ∪ J[4]
-    K3 = J[5]
-    K4 = J[6]
-    K5 = J[7]
-    K6 = J[8] ∪ J[9] ∪ J[10]
-    K7 = J[11]
-    K8 = J[12]
-    K = Dict(1=>K1, 2=>K2, 3=>K3, 4=>K4, 5=>K5, 6=>K6, 7=>K7, 8=>K8)
-end
-
-#function all_Ks(J)
-#    if 7 ∉ keys(J) # J are indices corresponding to GAVI solution
-#        @error "Method only intended for indices coresponding to GAVI solution"
-#    end
-#    J24 = J[2] ∩ J[4]
-#    J2 = setdiff(J[2], J24)
-#    J4 = setdiff(J[4], J24)
-#    J810 = J[8] ∩ J[10]
-#    J8 = setdiff(J[8], J810)
-#    J10 = setdiff(J[10], J810)
-#
-#    Ks = mapreduce(union, Iterators.product(powerset(J2),
-#                               powerset(J4),
-#                               powerset(J8),
-#                               powerset(J10),
-#                               powerset(J24),
-#                               powerset(J810))) do (S2, S4, S8, S10, S24, S810)
-#        
-#        sub_Ks = map(Iterators.product(powerset(S24), powerset(S810))) do (T24, T810)
-#
-#            C2 = setdiff(J2, S2) |> collect
-#            C24 = setdiff(J24, S24) |> collect
-#            D24 = setdiff(S24, T24) |> collect
-#            C4 = setdiff(J4, S4) |> collect
-#            C8 = setdiff(J8, S8) |> collect
-#            C810 = setdiff(J810, S810) |> collect
-#            D810 = setdiff(S810, T810) |> collect
-#            C10 = setdiff(J10, S10) |> collect
-#
-#            Dict(1=>Set([J[1];C2;C24]), 
-#                 2=>Set([J[3];S2;D24;S4]),
-#                 3=>Set([J[5];C4;T24]),
-#                 4=>Set(J[6]),
-#                 5=>Set([J[7];C8;C810]),
-#                 6=>Set([J[9];S8;D810;S10]),
-#                 7=>Set([J[11];C10;T810]),
-#                 8=>Set(J[12]))
-#        end |> Set
-#    end
-#end
 
 """
 Assume that J is a dict: i=>S ⊂ {1,2,3,4,5,6,7,8,9,10,11,12}
@@ -317,6 +207,15 @@ function all_Ks(J)
     Ks = map(Iterators.product([J[i] for i = 1:N]...)) do assignment
         K = Dict(j=>Set(findall(x->x==j, assignment)) for j = 1:8)
     end |> Set
+end
+
+function random_K(J, rng)
+    N = length(J)
+    K = Dict(i=>Set{Int}() for i = 1:8)
+    for (k,v) in J
+        s = rand(rng, v)
+        push!(K[s], k)
+    end
 end
 
 function set_guide!(gavi_sols::LocalGAVISolutions, guide)
@@ -339,42 +238,21 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
     m = length(w)
 
     nv = length(decision_inds)
-    #reducible_inds = nv+1:n
     reducible_inds = []
     (; piece, reduced_inds) = local_piece(gavi,n,m,K,level,subpiece_index; reducible_inds)
+    if isempty(piece)
+        throw(error("Piece is empty"))
+    end
     
-
-    #remaining_inds = setdiff(1:n, reduced_inds)
-    #z = z[remaining_inds] 
-    #n = length(z)
-    
-    local vertices
-    exemplar = zeros(n+m)
     if [z;w] ∈ piece
         slice_recipe = [z[1:nv]; fill(missing, n-nv); w]
-        try
-            (; V,R,L) = get_verts(simplify(poly_slice(piece, slice_recipe)))
-            vertices = [ [z[1:nv]; v; w] for v in V ]
-        catch err
-            @infiltrate
-        end
+        (; V,R,L) = get_verts(simplify(poly_slice(piece, slice_recipe)))
+        vertices = [ [z[1:nv]; v; w] for v in V ]
     else
         vertices = [] 
     end
-    
-    #vertices = [ [v; w] for v in V]
-    #rays = [ [r.a; zero(w)] for r in R]
-    #lines = [ [l.a; zero(w)] for l in L]
-    #avg_vertex = sum(vertices) / length(vertices)
-    #exemplar = avg_vertex + sum(rays; init=zeros(n+m)) + sum(lines; init=zeros(n+m))
-    #@infiltrate exemplar ∉ piece
-
-    #vertices = []
-    #exemplar = zeros(n+m)
-   
     piece = project_and_permute(piece, decision_inds, param_inds)
-
-    (; piece, exemplar, vertices)
+    (; piece, vertices)
 end
 
 function permute_eval(guide, v, decision_inds, param_inds)
@@ -397,14 +275,9 @@ function Base.iterate(gavi_sols::LocalGAVISolutions)
         gavi_sol_state = (; exploration_mode=true)
         return Base.iterate(gavi_sols, gavi_sol_state)
     else 
-        (next, pq_state) = iter_ret
+        (poly, pq_state) = iter_ret
         gavi_sol_state = (; pq_state, exploration_mode = false)
-
-        if !isempty(next.first.poly)
-            return (next.first.poly, gavi_sol_state)
-        else
-            return Base.iterate(gavi_sols, gavi_sol_state)
-        end
+        return (poly, gavi_sol_state)
     end
 end
 
@@ -414,58 +287,42 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
         if !isnothing(ret)
             (next, pq_state) = ret
             gavi_sol_state = (; pq_state, exploration_mode = false)
-            if !isempty(next.first.poly)
-                return (next.first.poly, gavi_sol_state)
-            else
-                return Base.iterate(gavi_sols, gavi_sol_state)
-            end
+            return (next, gavi_sol_state)
         end
     end
     # exploration mode (either continuing or starting)
-    if !isempty(gavi_sols.Ks) # if recipes available, process
-        @debug "Processing recipe. Length of queue: $(length(gavi_sols.Ks))." 
-        K = dequeue!(gavi_sols.Ks)
-        push!(gavi_sols.explored_Ks, K.recipe)
+    gavi_sol_state = (; exploration_mode = true)
+    if !isempty(gavi_sols.unexplored_Ks) # if recipes available, process
+        @debug "Processing recipe. Length of queue: $(length(gavi_sols.unexplored_Ks))." 
+        K = pop!(gavi_sols.unexplored_Ks)
+        push!(gavi_sols.explored_Ks, K)
         try
-            (; piece, exemplar, vertices) = expand(gavi_sols.gavi, 
-                                                   gavi_sols.z, 
-                                                   gavi_sols.w, 
-                                                   K.recipe, 
-                                                   gavi_sols.level, 
-                                                   gavi_sols.subpiece_index, 
-                                                   gavi_sols.decision_inds, 
-                                                   gavi_sols.param_inds)
-            fval = permute_eval(gavi_sols.guide, exemplar, gavi_sols.decision_inds, gavi_sols.param_inds)
-            enqueue!(gavi_sols.polys, PolyExemplar(piece, exemplar), fval) 
+            (; piece, vertices) = expand(gavi_sols.gavi, 
+                                         gavi_sols.z, 
+                                         gavi_sols.w, 
+                                         K, 
+                                         gavi_sols.level, 
+                                         gavi_sols.subpiece_index, 
+                                         gavi_sols.decision_inds, 
+                                         gavi_sols.param_inds)
+            push!(gavi_sols.polys, piece)
             for v in vertices
                 vert = Vertex(v=v)
                 if vert ∉ gavi_sols.explored_vertices
-                    #fval = permute_eval(gavi_sols.guide, v, gavi_sols.decision_inds, gavi_sols.param_inds)
-                    fval = 0.0
-                    enqueue!(gavi_sols.vertex_queue, vert, fval)
-                    #gavi_sols.vertex_queue[vert] = fval
+                    push!(gavi_sols.unexplored_vertices, vert)
                 end
             end
-            gavi_sol_state = (; exploration_mode = true)
-            if !isempty(piece)
-                return (piece, gavi_sol_state)
-            else
-                return Base.iterate(gavi_sols, gavi_sol_state)
-            end
+            return (piece, gavi_sol_state)
         catch err
-            gavi_sol_state = (; exploration_mode = true)  
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
-    elseif !isempty(gavi_sols.vertex_queue) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
-        @debug "Exploring vertex. Length of queue: $(length(gavi_sols.vertex_queue)). Num explored: $(length(gavi_sols.explored_vertices))"
-        v = dequeue!(gavi_sols.vertex_queue)
+    elseif !isempty(gavi_sols.unexplored_vertices) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
+        @debug "Exploring vertex. Length of queue: $(length(gavi_sols.unexplored_vertices)). Num explored: $(length(gavi_sols.explored_vertices))"
+        v = pop!(gavi_sols.unexplored_vertices)
         push!(gavi_sols.explored_vertices, v)
         J = comp_indices(gavi_sols.gavi, v.v[1:length(gavi_sols.z)], v.v[length(gavi_sols.z)+1:end], gavi_sols.permuted_request)
         Ks = all_Ks(J) |> (Ks -> setdiff(Ks, gavi_sols.explored_Ks))
-        for K in Ks
-            fval = permute_eval(gavi_sols.guide, v.v, gavi_sols.decision_inds, gavi_sols.param_inds)
-            gavi_sols.Ks[RecipeExemplar(K, v.v)] = fval
-        end
+        union!(gavi_sols.unexplored_Ks, Ks)
         return Base.iterate(gavi_sols, state)
     else
         return nothing

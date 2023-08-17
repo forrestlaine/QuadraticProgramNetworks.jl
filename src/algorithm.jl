@@ -116,8 +116,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             Sol_low = ret_low.Sol
             x_alts = ret_low.x_alts
 
-                
-            set_guide!(Sol_low, fair_objective)
             start = time()
             local_xs = []
             non_local_xs = Vector{Float64}[]
@@ -175,7 +173,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                                     qpn.options.make_requests,
                                     qpn.options.shared_variable_mode,
                                     rng)
-                    set_guide!(res.Sol, z->(z-x)'*(z-x))
                     new_fair_value = fair_objective(res.x_opt) # caution using fair_value
                     better_value_found = new_fair_value < current_fair_value - qpn.options.tol
                     same_value_found = new_fair_value < current_fair_value + qpn.options.tol
@@ -300,6 +297,5 @@ function combine(regions, solutions, level_dim; show_progress=true)
         end
         #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
         IntersectionRoot(combined, length.(complements), level_dim; show_progress)
-        #PolyUnion(vcat([collect(s) for s in solutions]...))
     end
 end

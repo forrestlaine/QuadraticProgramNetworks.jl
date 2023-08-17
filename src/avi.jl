@@ -314,7 +314,6 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
 
     if high_dimension
         extra_rounds = level==1 ? 0 : 5
-        #level == 3 && @infiltrate
         z_orig = z
         (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,level,subpiece_index,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
