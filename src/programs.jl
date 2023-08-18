@@ -1,10 +1,25 @@
+struct Linear <: Function
+    a::Vector{Float64} 
+end
+
+function Base.isequal(L1::Linear, L2::Linear)
+    isequal(L1.a, L2.a)
+end
+function Base.hash(L::Linear, h::UInt)
+    hash(("Linear",L.a), h)
+end
+
+function (f::Linear)(x::Vector{Float64})
+    f.a'*x
+end
+
 struct Quadratic <: Function
     Q::SparseMatrixCSC{Float64, Int32}
     q::Vector{Float64}
 end
 
 function (f::Quadratic)(x::Vector{Float64})
-    0.5*x'*(f.Q*x + f.q)
+    0.5*x'*(f.Q*x)+ x'*f.q
 end
 
 function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
@@ -45,7 +60,8 @@ Base.@kwdef mutable struct QPNetOptions
     tol::Float64=1e-4
     high_dimension::Bool=false
     high_dimension_max_iters::Int=10
-    debug::Bool=true
+    make_requests::Bool=true
+    debug::Bool=false
     gen_solution_map::Bool=false
 end
 
@@ -87,8 +103,18 @@ end
 
 function get_flat_initialization(qpn::QPNet; x0 = zeros(length(qpn.variables)))
     qpn_flat = flatten(qpn)
+    qpn_flat.options.gen_solution_map = false
     ret = solve(qpn_flat, x0)
     ret.x_opt
+end
+
+"""
+Convenience wrapper for setting up example problems. 
+Usually not a good idea to abuse value types like this but
+okay since these are not time-critical calls.
+"""
+function setup(sym::Symbol; args...)
+    setup(Val(sym); args...)
 end
 
 variables(name, dims...) = Symbolics.variables(name, dims...)
@@ -100,7 +126,11 @@ function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
     A = Symbolics.sparsejacobian(cons, qp_net.variables)
     rows,cols,vals = findnz(A)
     n, m = size(A)
-    A = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    try
+        A = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    catch err
+        error("Detected non-linear constraint!")
+    end
     droptol!(A, tol)
 
     vals = map(cons) do con
@@ -121,7 +151,11 @@ function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
     Q = Symbolics.sparsejacobian(grad, qp_net.variables)
     rows,cols,vals = findnz(Q)
     n,m = size(Q)
-    Q = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    try
+        Q = sparse(rows, cols, [Float64(v.val) for v in vals], n, m)
+    catch err
+        error("Detected non-quadratic cost!")
+    end
     q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
     droptol!(Q, tol)
     f = Quadratic(Q, q)
@@ -189,6 +223,10 @@ end
 
 function fair_obj(qpn::QPNet, level)
     sum([qpn.qps[i].f for i in qpn.network[level]])
+end
+
+function level_indices(qpn::QPNet, level)
+    reduce(vcat, (qpn.qps[i].var_indices for i in qpn.network[level]))
 end
 
 function sub_indices(qpn::QPNet, level)

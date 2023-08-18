@@ -1,7 +1,6 @@
 using StaticArrays
 using Infiltrator
 using QPN
-using GLMakie
 
 struct PolyObject{D, T}
     # Assumed clockwise ordering
@@ -57,58 +56,58 @@ function unpack(x; num_obj=2, T=5, num_obj_faces=4)
 end
 
 
-function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
+#function visualize(qpn, x; num_obj_faces=4, lane_width = 10.0)
+#
+#    N = length(x)
+#    num_obj = 0
+#    T = 0
+#    for k = 1:5
+#        try 
+#            T = Int((N-7-k*2) / ((num_obj_faces+1)*k+6))
+#            num_obj = k
+#            break
+#        catch e
+#            continue
+#        end
+#    end
+#    if T == 0
+#        throw(error("Can't identify values of T and num_obj"))
+#    end
+#
+#    f = Figure()
+#    f = Figure(resolution=(1440,1440))
+#    ax = f[1, 1] = Axis(f, aspect = DataAspect())
+#    xlims!(ax, -4.0, 12.0)
+#    ylims!(ax, -8.0, 8.0)
+#
+#    lines!(ax, [-4.0, 12], [-lane_width/2, -lane_width/2], color=:black)
+#    lines!(ax, [-4.0, 12], [lane_width/2, lane_width/2], color=:black)
+#
+#
+#
+#    vals = unpack(x; num_obj, T, num_obj_faces)
+#
+#    p = Circle(Point(vals.X0[1:2]...), 0.1f0)
+#    scatter!(ax, p, color=:green)
+#
+#    for i = 1:num_obj
+#        verts = map(1:num_obj_faces) do j
+#            θ = j*2π / num_obj_faces    
+#            SVector(vals.O[i][1]+cos(θ), vals.O[i][2]+sin(θ))
+#        end
+#        push!(verts, verts[1])
+#        lines!(ax, verts, color=:red)
+#    end
+#
+#    for t = 1:T
+#        xt = vals.X[t]
+#        p = Circle(Point(xt[1:2]...), 0.1f0)
+#        scatter!(ax, p, color=:blue)
+#    end
+#    display(f) 
+#end
 
-    N = length(x)
-    num_obj = 0
-    T = 0
-    for k = 1:5
-        try 
-            T = Int((N-6-k*2) / ((num_obj_faces+1)*k+6))
-            num_obj = k
-            break
-        catch e
-            continue
-        end
-    end
-    if T == 0
-        throw(error("Can't identify values of T and num_obj"))
-    end
-
-    f = Figure()
-    f = Figure(resolution=(1440,1440))
-    ax = f[1, 1] = Axis(f, aspect = DataAspect())
-    xlims!(ax, -4.0, 12.0)
-    ylims!(ax, -8.0, 8.0)
-
-    lines!(ax, [-4.0, 12], [-lane_width/2, -lane_width/2], color=:black)
-    lines!(ax, [-4.0, 12], [lane_width/2, lane_width/2], color=:black)
-
-
-
-    vals = unpack(x; num_obj, T, num_obj_faces)
-
-    p = Circle(Point(vals.X0[1:2]...), 0.1f0)
-    scatter!(ax, p, color=:green)
-
-    for i = 1:num_obj
-        verts = map(1:num_obj_faces) do j
-            θ = j*2π / num_obj_faces    
-            SVector(vals.O[i][1]+cos(θ), vals.O[i][2]+sin(θ))
-        end
-        push!(verts, verts[1])
-        lines!(ax, verts, color=:red)
-    end
-
-    for t = 1:T
-        xt = vals.X[t]
-        p = Circle(Point(xt[1:2]...), 0.1f0)
-        scatter!(ax, p, color=:blue)
-    end
-    display(f) 
-end
-
-function setup(; T=5,
+function setup(::Val{:robust_constrained}; T=5,
                  num_obj=1,
                  num_obj_faces=4,
                  obstacle_spacing = 1.0,
@@ -130,8 +129,9 @@ function setup(; T=5,
     h = QPN.variables(:h, 1:num_obj_faces, 1:num_obj, 1:T)
     c = QPN.variable(:c)
     v = QPN.variable(:v)
+    w = QPN.variable(:w)
     
-    qp_net = QPNet(x̄,x,u,h,s,o,c,v)
+    qp_net = QPNet(x̄,x,u,h,s,o,c,v,w)
  
     objs = map(1:num_obj) do i
         verts = map(1:num_obj_faces) do j
@@ -167,7 +167,7 @@ function setup(; T=5,
             end
             con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
             
-            level = 4
+            level = 5
             vars = [s[i, t]; [h[j, i, t] for j in 1:num_obj_faces]]
             player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], vars...)
         end
@@ -189,7 +189,7 @@ function setup(; T=5,
     lb = fill(0.0, length(min_cons))
     ub = fill(Inf, length(min_cons))
     con_id = QPN.add_constraint!(qp_net, min_cons, lb, ub)
-    level = 3
+    level = 4
     cost = -c
     player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], c)
 
@@ -229,16 +229,27 @@ function setup(; T=5,
     for i in 1:num_obj
         append!(obstacle_cons, R\o[:,i])
         append!(lb, [obstacle_distances_along[i], obstacle_offsets[i]-lane_width/5])
-        #append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/5])
-        append!(ub, [obstacle_distances_along[i], -1.1])
+        append!(ub, [obstacle_distances_along[i], obstacle_offsets[i]+lane_width/5])
+        #append!(ub, [obstacle_distances_along[i], 0.0])
     end
     obstacle_con_id = QPN.add_constraint!(qp_net, obstacle_cons, lb, ub)
 
     v_con_id = QPN.add_constraint!(qp_net, [v-c,], [0.0,], [Inf,])
 
-    level = 2
+    level = 3
     cost = 0.5*(v)^2
     player_id = QPN.add_qp!(qp_net, level, cost, [dyn_con_id, init_con_id, obstacle_con_id, v_con_id], x̄, x, o, v)
+    #####################################################################
+
+    # Add player responsible for modifying obstacles, initial state,
+    # so as to create worst-case cost (no private vars introduced)
+    
+
+    w_con_id = QPN.add_constraint!(qp_net, [0.5+c-w,], [0.0,], [Inf,])
+    
+    primary_cost = 0.5*w^2
+    level = 2
+    player_id = QPN.add_qp!(qp_net, level, primary_cost, [w_con_id,], w, u)
 
     #####################################################################
 
@@ -254,7 +265,7 @@ function setup(; T=5,
     # Add player responsible for choosing control variables
     # to avoid worst-case obstacles, initial condition
 
-    cons = [c,]
+    cons = []
     #for t = 1:T
     #    for i = 1:num_obj
     #        append!(cons, s[i,t])
@@ -263,8 +274,8 @@ function setup(; T=5,
     for t = 1:T
         append!(cons, u[:, t])
     end
-    lb = [0.2; fill(-max_accel, 2*T)]
-    ub = [Inf; fill(max_accel, 2*T)]
+    lb = fill(-max_accel, 2*T)
+    ub = fill(max_accel, 2*T)
     #lb = [zeros(num_obj*T); fill(-max_accel, 2*T)]
     #ub = [fill(Inf, num_obj*T); fill(max_accel, 2*T)]
     con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
@@ -272,7 +283,7 @@ function setup(; T=5,
     #primary_cost = sum(-lane_dist_incentive * x[1:2, t]'*lane_vec + 0.001*u[2,t]^2 for t = 1:T)
     primary_cost = sum((u[1,t]-15)^2+u[2,t]^2 for t = 1:T)
     level = 1
-    player_id = QPN.add_qp!(qp_net, level, primary_cost, [con_id,], u)
+    player_id = QPN.add_qp!(qp_net, level, primary_cost, [con_id,])
 
     QPN.assign_constraint_groups!(qp_net)
     QPN.set_options!(qp_net; kwargs...)

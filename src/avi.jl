@@ -55,7 +55,6 @@ function solve_avi(avi::AVI, z0, w)
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
-        @infiltrate
         return (; z, status=FAILURE)
     end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
@@ -79,8 +78,8 @@ function find_closest_feasible!(gavi, z0, w)
     ret = OSQP.solve!(model)
     if ret.info.status_val == 1
         z0 .= ret.x
-    else
-        @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
+    #else
+        #@warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
     end
 end
 
@@ -113,6 +112,24 @@ function convert(gavi::GAVI)
     AVI(M,N,o,l,u)
 end
 
+function relax_gavi(gavi::GAVI, relaxable_inds)
+    param_inds = setdiff(1:size(gavi.N,2), relaxable_inds)
+    d1 = length(gavi.l1)
+    d2 = length(gavi.l2)
+    dr = length(relaxable_inds)
+    M = [spzeros(dr, d1+d2+dr);
+         gavi.N[:,relaxable_inds] gavi.M]
+    N = [spzeros(dr, length(param_inds)); gavi.N[:, param_inds]]
+    o = [zeros(dr); gavi.o]
+    l1 = [fill(-Inf, dr); gavi.l1]
+    u1 = [fill(Inf, dr); gavi.u1]
+
+    A = [gavi.B[:,relaxable_inds] gavi.A]
+    B = gavi.B[:,param_inds]
+
+    GAVI(M,N,o,l1,u1,A,B,gavi.l2,gavi.u2)
+end
+
 function check_avi_solution(avi, z, w; tol=1e-6)
     r = avi.M*z + avi.N*w + avi.o
     r_pos = r .> tol
@@ -126,11 +143,14 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
+function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decision_inds=Vector{Int}();
                    var_indices=nothing,
                    level=0,
+                   subpiece_index=0,
                    debug=false,
+                   request_comes_from_parent=false,
                    high_dimension=false,
+                   make_requests=false,
                    gen_sol=true,
                    shared_variable_mode=SHARED_DUAL,
                    rng=MersenneTwister(1))
@@ -184,10 +204,16 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     end |> (x->vcat.(x...))
     
 
+    offset = N_private_vars + (N_players+1)*N_shared_vars
+    S_dual_inds = nothing
     As, A2s, Bs, ls, us = map(constraint_order) do id
-        # TODO make sure that As / A2s accounts for auxiliary variables
-        # properly (should be part of shared vars I think)
-        A,l,u,_,_ = vectorize(qep.constraints[id].poly)
+        (; A,l,u) = vectorize(qep.constraints[id].poly)
+        con_dim = length(l)
+        if id == -1
+            S_dual_inds = collect(offset+1:offset+con_dim)
+        else
+            offset += con_dim
+        end
         local_aux_dim = size(A,2) - x_dim
         player_to_group_map = qep.constraints[id].group_mapping
         group_to_player_map = Dict{Int, Vector{Int}}()
@@ -220,7 +246,7 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         end
         [A1 Ax], A2, B1, l1, u1
     end |> (x->vcat.(x...))
-
+    
     M11 = Qs
     M12 = underconstrained ? Mψ : spzeros(size(Mψ))
     M13 = -A2s'
@@ -258,20 +284,39 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
     # TODO : if I want to support successive minimization of ||ψ|| over
     # iterations, need to properly warmstart with previous solution? Might
     # require reducing dimension AFTER psi minimization
- 
+
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
+
     (; z, status) = solve_gavi(gavi, z0, w)
+    if status != SUCCESS
+        relaxable_parent_inds = setdiff(relaxable_inds, decision_inds)
+        relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
+        if !isempty(relaxable_parent_inds) && request_comes_from_parent
+            debug && @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
+            r_gavi = relax_gavi(gavi, relaxable_parent_inds)
+            r_z0 = [w[relaxable_parent_inds]; z0]
+            r_w = w[setdiff(1:length(w), relaxable_parent_inds)]
+            ret = solve_gavi(r_gavi, r_z0, r_w)
+            status = ret.status
+            if status != SUCCESS
+                error("AVI solve error, even after relaxing indices.")
+            end
+            l_r = length(relaxable_parent_inds)
+            w[relaxable_parent_inds] = ret.z[1:l_r]
+            z = ret.z[l_r+1:end]
+        else
+            error("AVI solve error!")
+        end
+    end
     
-    status != SUCCESS && @infiltrate
-    status != SUCCESS && @warn "AVI solve error!"
-    status != SUCCESS && error("AVI solve error!")
+
     ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
     if high_dimension
+        throw(error("High dimension mode not supported at the moment"))
         extra_rounds = level==1 ? 0 : 5
-        #level == 3 && @infiltrate
         z_orig = z
-        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
+        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,level,subpiece_index,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
         z_inds_remaining = setdiff(1:length(z), reduced_inds)
         z = z[z_inds_remaining] 
         if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM
@@ -289,21 +334,95 @@ function solve_qep(qep_base, x, S=nothing, shared_decision_inds=Vector{Int}();
         reduced_piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
 	    @infiltrate !(x_opt in reduced_piece)
         @infiltrate embedded_dim(reduced_piece) > length(x_opt)
-        (; x_opt, Sol=[reduced_piece,])
+        (; x_opt, Sol=[reduced_piece,], identified_request=nothing)
     else
         if shared_variable_mode == MIN_NORM
             @error "not implemented yet" 
         elseif shared_variable_mode == SHARED_DUAL
-            @info "Found solution, now generating solution map (level $(level))"
+            @debug "Found solution, now generating solution map (level $(level))"
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, decision_inds, param_inds; max_vertices = 1) : nothing
-            @info "Solution map generated."
-            (; x_opt, Sol)
+            x_opt[param_inds] = w
+
+            # TODO figure out request structure with vertex expansion (is
+            # v-enum even required?)
+            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 1000) : nothing
+            @debug "Solution map generated."
+
+            # TODO : should probably propagate any parent level requests if
+            # they appear in S 
+
+            if isnothing(S) || !make_requests
+                identified_request = Set{Linear}()
+            else
+                S_duals = z[S_dual_inds]
+                identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
+            end
+            (; x_opt, Sol, identified_request)
         else
             @error "Invalid shared variable mode: $shared_variable_mode."
         end
     end
+end
+
+function identify_request(S, λs, parent_request; propagate=false)
+    identified_request = Set{Linear}()
+    (; A, l, u) = vectorize(S)
+    (m,d) = size(A)
+
+    if propagate
+        for req in parent_request
+            if iszero(req.a[d+1:end])
+                for i = 1:m
+                    if req.a[1:d] ≈ A[i,:] 
+                        union!(identified_request, propagate_request(A[i,:], get_parent(S, i)))
+                    elseif req.a[1:d] ≈ -A[i,:]
+                        union!(identified_request, propagate_request(-A[i,:], get_parent(S, i)))
+                    end
+                end
+            end
+        end
+    else
+        for (i, λ) in enumerate(λs)
+            if λ ≥ 1e-4 && has_parent(S, i)
+                union!(identified_request, propagate_request(A[i,:], get_parent(S, i)))
+            elseif λ ≤ -1e-4 && has_parent(S, i)
+                union!(identified_request, propagate_request(-A[i,:], get_parent(S, i)))
+            end
+        end
+    end
+    identified_request
+end
+
+function propagate_request(request, poly)
+    m = OSQP.Model()
+    d = embedded_dim(poly)
+    n = length(request)
+    q = zeros(d)
+    q[1:n] = request
+    (; A, l, u) = vectorize(poly)
+    OSQP.setup!(m; q, A, l, u,
+                verbose=false,
+                polish=true,
+                eps_abs=1e-8,
+                eps_rel=1e-8)
+    ret = OSQP.solve!(m)
+    prop_requests = Set{Linear}()
+    if ret.info.status_val == 1
+        duals = -ret.y
+        for (i, λ) in enumerate(duals)
+            if λ ≥ 1e-4
+                push!(prop_requests, Linear(A[i,:]))
+            elseif λ ≤ -1e-4
+                push!(prop_requests, Linear(-A[i,:]))
+            end
+        end
+    else
+        # This shouldn't happen (would mean halfspace in projected poly isn't
+        # implied by halfspace in parent poly)
+        throw(error("Unable to propagate request to parent poly for some reason."))
+    end
+    prop_requests
 end
 
 """
@@ -319,7 +438,11 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     # TODO refactor this to use solve_qep (need to call this function from
     # algorithm.jl)
 
-    (A, ll, uu, _, _) = vectorize(piece)
+    vec = vectorize(piece)
+    A = vec.A
+    ll = vec.l
+    uu = vec.u
+
     (m,n) = size(A)
 
     nz = length(zr)
@@ -347,7 +470,7 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     end
     status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
-    (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, decision_inds, param_inds, rng; permute=false)
+    (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, param_inds, rng; permute=false)
     (; piece, x_opt, z_revised=z)
 end
 
