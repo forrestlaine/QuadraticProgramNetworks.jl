@@ -205,12 +205,20 @@ end
 Assume that J is a dict: i=>S ⊂ {1,2,3,4,5,6,7,8,9,10,11,12}
 """
 function all_Ks(J)
+    Ks = Set{PolyRecipe}()
     N = length(J)
     It = Iterators.product([J[i] for i = 1:N]...)
-    @infiltrate
-    Ks = map(It) do assignment
+    for assignment in It
         K = Dict(j=>Set(findall(x->x==j, assignment)) for j = 1:8)
-    end |> Set
+        push!(Ks, K)
+    end
+
+    # TODO can make Ks an iterator with distinct elements (instead of a Set) using the following
+    # Ks = Iterators.map(It) do assignment
+    #   Dict(j=>Set(findall(x->x==j, assignment)) for j = 1:8)
+    # end |> distinct
+
+    Ks
 end
 
 function random_K(J, rng)
