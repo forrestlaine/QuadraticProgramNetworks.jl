@@ -117,9 +117,7 @@ mutable struct LocalGAVISolutions
         m = length(w)
         permuted_request = unpermute(request, n+m, decision_inds, param_inds)
         J = comp_indices(gavi,z,w,permuted_request)
-        @infiltrate
         Ks = all_Ks(J)
-        @infiltrate
         @debug "There are $(length(Ks)) immediately available pieces of this solution map." 
         polys = Set{Poly}()
         explored_Ks = Set{PolyRecipe}()
@@ -131,7 +129,7 @@ mutable struct LocalGAVISolutions
 end
 
 function potential_length(ls::LocalGAVISolutions)
-    length(ls.Ks) + length(ls.explored_Ks)
+    length(ls.unexplored_Ks) + length(ls.explored_Ks)
 end
 
 function depth(ls::LocalGAVISolutions)

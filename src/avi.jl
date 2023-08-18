@@ -343,7 +343,6 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
             x_opt = copy(x)
             x_opt[decision_inds] = z[1:length(decision_inds)]
             x_opt[param_inds] = w
-            @infiltrate
 
             # TODO figure out request structure with vertex expansion (is
             # v-enum even required?)

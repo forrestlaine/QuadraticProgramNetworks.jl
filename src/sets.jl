@@ -429,12 +429,11 @@ function project(p::Poly, keep_dims; tol=1e-6)
 
     proj_vr = vrep(projected_points, projected_lines, projected_rays)
     projected = polyhedron(proj_vr)
-    proj_hr = hrep(projected)
-
-    AUi = mapreduce(vcat, halfspaces(proj_hr); init=zeros(0, length(keep_dims)+1)) do hs
+    #proj_hr = hrep(projected)
+    AUi = mapreduce(vcat, Polyhedra.halfspaces(projected); init=zeros(0, length(keep_dims)+1)) do hs
         [hs.a' hs.β]
     end
-    AUe = mapreduce(vcat, hyperplanes(proj_hr); init=zeros(0,length(keep_dims)+1)) do hp
+    AUe = mapreduce(vcat, Polyhedra.hyperplanes(projected); init=zeros(0,length(keep_dims)+1)) do hp
         [hp.a' hp.β]
     end
     ni = size(AUi,1)
