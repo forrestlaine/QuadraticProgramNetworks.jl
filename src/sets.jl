@@ -372,6 +372,42 @@ function closure(p::IntersectionPoly)
 end
 
 """
+Determine whether P1 ⊆ P2, i.e. if P1 is a subset of P2.
+"""
+function Base.issubset(P1::Poly, P2::Poly; tol=1e-6)
+    (; A, l, u) = vectorize(P1)
+    A1 = A; l1 = l; u1 = u;
+    (; A, l, u) = vectorize(P2)
+    A2 = A; l2 = l; u2 = u;
+
+    m = length(l2)
+    for i = 1:m
+        for (bound, dir) in zip((l2[i], u2[i]), (1.0, -1.0))
+            if isfinite(bound)
+                model = OSQP.Model()
+                OSQP.setup!(model; 
+                            q = dir*collect(A2[i,:]), 
+                            A=A1, 
+                            l=l1, 
+                            u=u1, 
+                            verbose=false, 
+                            polish=true, 
+                            eps_abs=tol, 
+                            eps_rel=tol)
+                ret = OSQP.solve!(model)
+                if ret.info.status_val != 1
+                    return false # appears unbounded below
+                elseif ret.info.obj_val < dir*bound - tol
+                    return false
+                end
+            end
+        end
+    end
+    return true
+end
+
+
+"""
 Convert to Polyhedra.jl polyhedron object. #TODO should probably use this format everywhere
 
 NOTE assumes that p is a closed polyhedron. 
@@ -845,4 +881,12 @@ function convex_hull(pu::PolyUnion)
     end
     vr = vrep(VV,LL,RR)
     vrep_to_poly(vr)
+end
+
+"""
+Determine whether P1 ⊆ P2, i.e. if P1 is a subset of P2.
+"""
+function Base.issubset(P1::Poly, P2::PolyUnion; tol=1e-6)
+    @warn "Determining subset relations are hard for unions of polyhedra. This method is therefore not guaranteed to be correct. Return values of 'true' are correct, whereas a 'false' return may not actually imply a negative result."
+    any(P1 ⊆ P for P in P2)
 end

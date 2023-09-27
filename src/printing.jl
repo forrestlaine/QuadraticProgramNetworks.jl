@@ -20,6 +20,10 @@ function Base.show(io::IO, ::MIME"text/plain", lpoly::LabeledPoly)
     indent=get(io, :indent, 0)
     space = " "^indent
     n = length(poly)
+    if n == 0
+        println(io, spsce*"Polyhedron ≡ ℝᵈ. Cannot infer dimension d.")
+        return
+    end
     d = embedded_dim(poly)
     @assert d ≥ length(labels)
     reverse_labels = Dict()

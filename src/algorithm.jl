@@ -147,6 +147,40 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 continue
             end
 
+            if qpn.options.try_hull
+                PU = PolyUnion(collect(distinct(Sol_low)))
+                H = convex_hull(PU) |> simplify
+                low_feasible = x ∈ PU
+                @infiltrate
+                try 
+                    res = solve_qep(qep, x, request, relaxable_inds, H, sub_inds;
+                                    qpn.var_indices,
+                                    level,
+                                    subpiece_index=0,
+                                    request_comes_from_parent,
+                                    qpn.options.debug,
+                                    qpn.options.high_dimension,
+                                    qpn.options.make_requests,
+                                    qpn.options.shared_variable_mode,
+                                    rng)
+
+                    @infiltrate
+                    new_fair_value = fair_objective(res.x_opt) # caution using fair_value
+                    better_value_found = new_fair_value < current_fair_value - qpn.options.tol
+                    same_value_found = new_fair_value < current_fair_value + qpn.options.tol
+                    high_level_shift = !(res.x_opt[param_inds] ≈ w)
+                    if !(high_level_shift || current_infeasible || better_value_found)
+                        @infiltrate
+                        current_agrees_with_piece = any(S -> x ∈ S, res.Sol)
+                        if current_agrees_with_piece || same_value_found
+                            valid = all(S ⊆ PU for S in res.Sol)
+                            @infiltrate
+                        end
+                    end
+                catch e
+                end
+            end
+
             sub_count = 0
             throw_count = 0
             err_count = 0
