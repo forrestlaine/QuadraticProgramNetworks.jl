@@ -410,13 +410,57 @@ function get_verts(p; tol=1e-6)
 end
 
 """
+Converts a Polyhedra.VRep object to a QPN Poly object
+"""
+function vrep_to_poly(vr)
+    polyh = polyhedron(vr)
+    #proj_hr = hrep(projected)
+    HS = Polyhedra.halfspaces(polyh)
+    HP = Polyhedra.hyperplanes(polyh)
+    dim = 0
+    if length(HS) == 0
+        AUi = nothing
+        ni = 0
+    else
+        AUi = mapreduce(vcat, HS) do hs
+            [hs.a' hs.β]
+        end
+        ni = size(AUi,1)
+        dim = size(AUi, 2)
+    end
+    if length(HP) == 0
+        AUe = nothing
+        ne = 0
+    else
+        AUe = mapreduce(vcat, HP) do hp
+            [hp.a' hp.β]
+        end
+        ne = size(AUe,1)
+        dim = size(AUe, 2)
+    end
+    if dim == 0 
+        error("Vrep appears to be empty")
+    else
+        if isnothing(AUi)
+            AUi = zeros(0, dim)
+        end
+        if isnothing(AUe)
+            AUe = zeros(0, dim)
+        end
+    end
+    A = sparse([AUi[:,1:end-1]; AUe[:,1:end-1]])
+    l = Vector{Float64}([fill(-Inf, ni); AUe[:,end]])
+    u = Vector{Float64}([AUi[:,end]; AUe[:,end]])
+    Poly(A,l,u)
+end
+
+"""
 Project the poly into lower embedded dimension.
 """
 function project(p::Poly, keep_dims; tol=1e-6)
     hr = get_Polyhedron_hrep(simplify(p); tol)
     poly = Polyhedra.polyhedron(hr)
     vr = vrep(poly)
-
 
     N = embedded_dim(p)
 
@@ -428,20 +472,8 @@ function project(p::Poly, keep_dims; tol=1e-6)
     projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, lines(vr))
 
     proj_vr = vrep(projected_points, projected_lines, projected_rays)
-    projected = polyhedron(proj_vr)
-    #proj_hr = hrep(projected)
-    AUi = mapreduce(vcat, Polyhedra.halfspaces(projected); init=zeros(0, length(keep_dims)+1)) do hs
-        [hs.a' hs.β]
-    end
-    AUe = mapreduce(vcat, Polyhedra.hyperplanes(projected); init=zeros(0,length(keep_dims)+1)) do hp
-        [hp.a' hp.β]
-    end
-    ni = size(AUi,1)
-    ne = size(AUe,1)
-    A = sparse([AUi[:,1:end-1]; AUe[:,1:end-1]])
-    l = Vector{Float64}([fill(-Inf, ni); AUe[:,end]])
-    u = Vector{Float64}([AUi[:,end]; AUe[:,end]])
-    ProjectedPoly(Poly(A,l,u), p)
+    projected = vrep_to_poly(proj_vr)
+    ProjectedPoly(projected, p)
 end
 
 
@@ -787,3 +819,30 @@ function poly_intersect(p::PolyUnion, ps::PolyUnion...)
     unions = (poly_intersect(subpieces...) for subpieces in Iterators.product(p, ps...))
 end
 
+function convex_hull(pu::PolyUnion)
+    VV = Set{QuantizedVector}() 
+    LL = Set{QuantizedVector}() # these are not vertices in the mathematical sense, but rather use the datatype to avoid many numerically equivalent duplicates
+    RR = Set{QuantizedVector}()
+    for p in pu
+        (; V, L, R) = get_verts(p)
+        foreach(v->push!(VV,QuantizedVector(v=v)), V)
+        foreach(l->push!(LL,QuantizedVector(v=l.a)), L)
+        foreach(r->push!(RR,QuantizedVector(v=r.a)), R)
+    end
+
+    #projected_points::Vector{Vector{Float64}} = map(point->Pmat*point, points(vr))
+    #projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(ray->Pmat*ray, rays(vr))
+    #projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, lines(vr))
+    
+    VV = map(collect(VV)) do v
+        v.v
+    end
+    LL = map(collect(LL)) do l
+        Polyhedra.Line(l.v)
+    end
+    RR = map(collect(RR)) do r
+        Polyhedra.Ray(r.v)
+    end
+    vr = vrep(VV,LL,RR)
+    vrep_to_poly(vr)
+end

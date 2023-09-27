@@ -20,14 +20,14 @@ end
 """
 Simple wrapper around Vector{Float64} to enable numerical 'isequal'.
 """
-Base.@kwdef struct Vertex
+Base.@kwdef struct QuantizedVector
     v::Vector{Float64}
     digits::Int=5
 end
-function Base.isequal(v1::Vertex, v2::Vertex)
+function Base.isequal(v1::QuantizedVector, v2::QuantizedVector)
     isequal(round.(v1.v; digits=v1.digits), round.(v2.v;digits=v2.digits))
 end
-function Base.hash(v::Vertex, h::UInt)
+function Base.hash(v::QuantizedVector, h::UInt)
     hash(round.(v.v; digits=v.digits))
 end
 
@@ -97,8 +97,8 @@ mutable struct LocalGAVISolutions
     subpiece_index::Int
     unexplored_Ks::Set{PolyRecipe}
     explored_Ks::Set{PolyRecipe}
-    unexplored_vertices::Set{Vertex}
-    explored_vertices::Set{Vertex}
+    unexplored_vertices::Set{QuantizedVector}
+    explored_vertices::Set{QuantizedVector}
     max_vertices::Int
     polys::Set{Poly}
     decision_inds::Vector{Int}
@@ -121,8 +121,8 @@ mutable struct LocalGAVISolutions
         @debug "There are $(length(Ks)) immediately available pieces of this solution map." 
         polys = Set{Poly}()
         explored_Ks = Set{PolyRecipe}()
-        vertex_queue = Set{Vertex}()
-        v = Vertex(v=[z;w])
+        vertex_queue = Set{QuantizedVector}()
+        v = QuantizedVector(v=[z;w])
         explored_vertices = Set((v,))
         new(gavi, z, w, level, subpiece_index, Ks, explored_Ks, vertex_queue, explored_vertices, max_vertices, polys, decision_inds, param_inds, permuted_request)
     end
@@ -317,7 +317,7 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
                                          gavi_sols.param_inds)
             push!(gavi_sols.polys, piece)
             for v in vertices
-                vert = Vertex(v=v)
+                vert = QuantizedVector(v=v)
                 if vert ∉ gavi_sols.explored_vertices
                     push!(gavi_sols.unexplored_vertices, vert)
                 end
