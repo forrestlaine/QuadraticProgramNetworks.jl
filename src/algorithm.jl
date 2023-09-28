@@ -178,6 +178,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                         end
                     end
                 catch e
+                    @infiltrate
                 end
             end
 
@@ -294,7 +295,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                     continue
                 end
             end
-
+            @infiltrate 
             level_dim = length(param_indices(qpn, level))
             local S
             try

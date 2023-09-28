@@ -60,9 +60,9 @@ Base.@kwdef mutable struct QPNetOptions
     tol::Float64=1e-4
     high_dimension::Bool=false
     high_dimension_max_iters::Int=10
-    make_requests::Bool=true
+    make_requests::Bool=false
     try_hull::Bool=true
-    debug::Bool=false
+    debug::Bool=true
     gen_solution_map::Bool=false
 end
 

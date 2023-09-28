@@ -48,13 +48,14 @@ Currently uses PATHSolver
 function solve_avi(avi::AVI, z0, w)
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
-                                                   silent=true, 
+                                                   silent=false, 
                                                    convergence_tolerance=1e-8, 
                                                    cumulative_iteration_limit=100000,
                                                    restart_limits=5,
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
+        @infiltrate
         return (; z, status=FAILURE)
     end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
@@ -78,8 +79,9 @@ function find_closest_feasible!(gavi, z0, w)
     ret = OSQP.solve!(model)
     if ret.info.status_val == 1
         z0 .= ret.x
-    #else
-        #@warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
+    else
+        @infiltrate
+        @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
     end
 end
 
@@ -305,6 +307,7 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
             w[relaxable_parent_inds] = ret.z[1:l_r]
             z = ret.z[l_r+1:end]
         else
+            @infiltrate
             error("AVI solve error!")
         end
     end
