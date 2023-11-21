@@ -167,7 +167,7 @@ function setup(::Val{:robust_constrained}; T=5,
             end
             con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
             
-            level = 5
+            level = 4
             vars = [s[i, t]; [h[j, i, t] for j in 1:num_obj_faces]]
             player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], vars...)
         end
