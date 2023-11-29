@@ -857,7 +857,7 @@ end
 
 function convex_hull2(pu::PolyUnion)
     VV = Set{QuantizedVector}() 
-    LL = Set{QuantizedVector}() # these are not vertices in the mathematical sense, but rather use the datatype to avoid many numerically equivalent duplicates
+    LL = Set{QuantizedVector}() 
     RR = Set{QuantizedVector}()
     for p in pu
         (; V, L, R) = get_verts(p)
@@ -865,11 +865,6 @@ function convex_hull2(pu::PolyUnion)
         foreach(l->push!(LL,QuantizedVector(v=l.a)), L)
         foreach(r->push!(RR,QuantizedVector(v=r.a)), R)
     end
-
-    #projected_points::Vector{Vector{Float64}} = map(point->Pmat*point, points(vr))
-    #projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(ray->Pmat*ray, rays(vr))
-    #projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, lines(vr))
-    
     VV = map(collect(VV)) do v
         v.v
     end
