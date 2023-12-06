@@ -69,7 +69,8 @@ end
 struct QPNet
     qps::Dict{Int, QP}
     constraints::Dict{Int, Constraint}
-    network::Dict{Int, Set{Int}}
+    network_edges::Dict{Int, Set{Int}}
+    network_depth_map::Dict{Int, Set{Int}}
     options::QPNetOptions
     variables::Vector{Num}
     var_indices::Dict{Num, Int}
@@ -88,9 +89,10 @@ function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
     end
     qps = Dict{Int, QP}()
     constraints = Dict{Int, Constraint}()
-    network =  Dict{Int, Set{Int}}()
+    network_edges =  Dict{Int, Set{Int}}()
+    network_depth_map =  Dict{Int, Set{Int}}()
     options = QPNetOptions()
-    QPNet(qps, constraints, network, options, all_vars, var_inds)    
+    QPNet(qps, constraints, network_edges, network_depth_map, options, all_vars, var_inds)    
 end
 
 function flatten(qpn::QPNet)
@@ -147,7 +149,7 @@ function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
     return id
 end
 
-function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
+function add_qp!(qp_net, cost, con_inds, private_vars...; tol=1e-8)
     grad = Symbolics.gradient(cost, qp_net.variables)
     Q = Symbolics.sparsejacobian(grad, qp_net.variables)
     rows,cols,vals = findnz(Q)
@@ -167,23 +169,68 @@ function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
     end
     player_id = maximum(keys(qp_net.qps), init=0) + 1
     qp_net.qps[player_id] = QP(f, con_inds, var_inds)
-    if level in keys(qp_net.network)
-        push!(qp_net.network[level], player_id)
-    else
-        qp_net.network[level] = Set(player_id)
-    end
+    #if level in keys(qp_net.network)
+    #    push!(qp_net.network[level], player_id)
+    #else
+    #    qp_net.network[level] = Set(player_id)
+    #end
     return player_id
 end
 
+function create_minimal_adj_matrix(N, edge_list)
+    A = zeros(Bool, N, N)
+    for (i,j) in edge_list
+        if i == j
+            error("Cannot have self edges. (In this case, node $i -> $i).")
+        end
+        A[i,j] = true
+    end
+
+    R = ones(Bool, N, N) # transition matrix
+    Aⁿ = copy(A)
+    edge_deleted = false
+    for n = 2:N
+        R .|= Aⁿ
+        Aⁿ = (Aⁿ * A) .> 0
+        for i = 1:N
+            if Aⁿ[i,i]
+                error("Cycle detected. (In this case, cycle leading from node $i -> $i after $n transitions.")
+            end
+            for j = 1:N
+                if A[i,j] && Aⁿ[i,j]
+                    A[i,j] = false
+                    @info "Deleting $i -> $j (n=$n)"
+                end
+            end
+        end
+    end
+    A
+end
+
+function add_edges!(qp_net, edge_list)
+    N = length(qp_net.qps)
+    A = create_minimal_adj_matrix(N, edge_list)
+end
+
+"""
+If group_map[constraint_id][player_a] == group_map[constraint_id][player_b], then 
+player_a and player_b share a multiplier for constraint_id.
+
+If no group_map is provided for a particular constraint, it is assumed that each player has a unique multiplier associated with the constriant.
+"""
 function assign_constraint_groups!(qp_net; group_map=Dict{Int, Dict{Int, Int}}())
     # TODO make dirty flag, set until this is called
     for (con_id, constraint) in qp_net.constraints
         for (player_id, qp) in qp_net.qps
             if con_id in qp.constraint_indices
-                group_id = 
-                    (con_id ∈ keys(group_map)) && (player_id ∈ keys(group_map[con_id])) ? 
-                    group_map[con_id][player_id] : 
-                    player_id
+                if con_id ∈ keys(group_map)
+                    if player_id ∉ keys(group_map[con_id])
+                        error("A group map is provided for constraint $con_id, but it does not contain mappings for all players who respect this constraint (namely player $player_id).")
+                    end
+                    group_id = group_map[con_id][player_id]
+                else
+                    group_id = player_id
+                end
                 constraint.group_mapping[player_id] = group_id
             end
         end
