@@ -855,7 +855,7 @@ function poly_intersect(p::PolyUnion, ps::PolyUnion...)
     unions = (poly_intersect(subpieces...) for subpieces in Iterators.product(p, ps...))
 end
 
-function convex_hull(pu::PolyUnion)
+function convex_hull2(pu::PolyUnion)
     VV = Set{QuantizedVector}() 
     LL = Set{QuantizedVector}() 
     RR = Set{QuantizedVector}()
@@ -875,6 +875,18 @@ function convex_hull(pu::PolyUnion)
         Polyhedra.Ray(r.v)
     end
     vr = vrep(VV,LL,RR)
+    vrep_to_poly(vr)
+end
+function convex_hull(pu::PolyUnion; tol=1e-6)
+    polyhedra = map(pu) do p 
+        hr = get_Polyhedron_hrep(simplify(p); tol)
+        poly = Polyhedra.polyhedron(hr)
+        vr = vrep(poly)
+        poly
+    end
+    hull = Polyhedra.convexhull(polyhedra...)
+    Polyhedra.removevredundancy!(hull)
+    vr = vrep(hull)
     vrep_to_poly(vr)
 end
 
