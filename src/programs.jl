@@ -70,6 +70,7 @@ struct QPNet
     qps::Dict{Int, QP}
     constraints::Dict{Int, Constraint}
     network_edges::Dict{Int, Set{Int}}
+    reachable_nodes::Dict{Int, Set{Int}}
     network_depth_map::Dict{Int, Set{Int}}
     options::QPNetOptions
     variables::Vector{Num}
@@ -90,9 +91,10 @@ function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
     qps = Dict{Int, QP}()
     constraints = Dict{Int, Constraint}()
     network_edges =  Dict{Int, Set{Int}}()
+    reachable_nodes =  Dict{Int, Set{Int}}()
     network_depth_map =  Dict{Int, Set{Int}}()
     options = QPNetOptions()
-    QPNet(qps, constraints, network_edges, network_depth_map, options, all_vars, var_inds)    
+    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds)    
 end
 
 function flatten(qpn::QPNet)
@@ -177,6 +179,17 @@ function add_qp!(qp_net, cost, con_inds, private_vars...; tol=1e-8)
     return player_id
 end
 
+"""
+Deletes edges that are redundant in the adjacency matrix. Returns 
+the minimal adjacency matrix as well as the reachability matrix,
+where the R[i,j] = true if node j is reachable from node i.
+
+If cyclic graphs are detected, returns an error, since cycles result in degenerate 
+equilibrium points.
+
+This is not the fastest implementation of this algorithm, but this is
+for a non-critical path (setup).
+"""
 function create_minimal_adj_matrix(N, edge_list)
     A = zeros(Bool, N, N)
     for (i,j) in edge_list
@@ -186,7 +199,7 @@ function create_minimal_adj_matrix(N, edge_list)
         A[i,j] = true
     end
 
-    R = ones(Bool, N, N) # transition matrix
+    R = zeros(Bool, N, N) # transition matrix
     Aⁿ = copy(A)
     edge_deleted = false
     for n = 2:N
@@ -199,17 +212,55 @@ function create_minimal_adj_matrix(N, edge_list)
             for j = 1:N
                 if A[i,j] && Aⁿ[i,j]
                     A[i,j] = false
-                    @info "Deleting $i -> $j (n=$n)"
+                    @info "Deleting $i -> $j (found alternate path using $n transitions)"
                 end
             end
         end
     end
-    A
+    A, R
 end
 
+"""
+Uses the reachability matrix R to compute a depth map.
+The nodes at depth d only have dependences on nodes of depth d+1 or greater. 
+Any node in the graph can be reached from at least one of the nodes at depth 1.
+"""
+function create_depth_map(R)
+    depth_map = Dict{Int, Set{Int}}()
+    N = size(R,1)
+    deleted_nodes = Set()
+    d = 0
+    Rd = copy(R)
+    while length(deleted_nodes) < N
+        nodes_at_depth = setdiff(Set([i for i in 1:N if !any(Rd[:,i])]), deleted_nodes)
+        if length(nodes_at_depth) > 0
+            d += 1
+            depth_map[d] = nodes_at_depth
+            union!(deleted_nodes, nodes_at_depth)
+            remaining_nodes = setdiff(1:N, deleted_nodes)
+            Rd = R[remaining_nodes,:]
+        else
+            error("Something appears wrong with the graph structure. There should always be nodes found for every increasing depth")
+        end
+    end
+    @assert sum(sum(R[i,:] for i in depth_map[1]) .> 0) == N - length(depth_map[1])
+    depth_map
+end
+
+"""
+Add edges to the qp_net
+"""
 function add_edges!(qp_net, edge_list)
     N = length(qp_net.qps)
-    A = create_minimal_adj_matrix(N, edge_list)
+    A, R = create_minimal_adj_matrix(N, edge_list)
+    depth_map = create_depth_map(R)
+    for (d, nodes) in depth_map
+        qp_net.network_depth_map[d] = nodes
+    end
+    for i in 1:N
+        qp_net.network_edges[i] = Set(collect(1:N)[A[i,:]])
+        qp_net.reachable_nodes[i] = Set(collect(1:N)[R[i,:]])
+    end
 end
 
 """
@@ -256,11 +307,11 @@ function display_solution(qpn::QPNet, x)
 end
 
 function num_levels(qpn::QPNet)
-    length(qpn.network)
+    length(qpn.network_depth_map)
 end
 
 function gather(qpn::QPNet, level)
-    qps = Dict(i=>qpn.qps[i] for i in qpn.network[level])
+    qps = Dict(i=>qpn.qps[i] for i in qpn.network_depth_map[level])
     constraints = Dict{Int, Constraint}(id=>qpn.constraints[id] for qp in values(qps) for id in qp.constraint_indices)
     QEP(qps, constraints)
 end
@@ -270,16 +321,16 @@ function fair_obj(qep::QEP)
 end
 
 function fair_obj(qpn::QPNet, level)
-    sum([qpn.qps[i].f for i in qpn.network[level]])
+    sum([qpn.qps[i].f for i in qpn.network_depth_map[level]])
 end
 
 function level_indices(qpn::QPNet, level)
-    reduce(vcat, (qpn.qps[i].var_indices for i in qpn.network[level]))
+    reduce(vcat, (qpn.qps[i].var_indices for i in qpn.network_depth_map[level]))
 end
 
 function sub_indices(qpn::QPNet, level)
-    L = length(qpn.network)
-    reduce(vcat, (qpn.qps[i].var_indices for l in level+1:L for i in qpn.network[l]))
+    L = length(qpn.network_depth_map)
+    reduce(vcat, (qpn.qps[i].var_indices for l in level+1:L for i in qpn.network_depth_map[l]))
 end
 
 function subeq_indices(qpn::QPNet, level)
