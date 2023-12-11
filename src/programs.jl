@@ -316,6 +316,14 @@ function gather(qpn::QPNet, level)
     QEP(qps, constraints)
 end
 
+function decision_inds(qpn::QPNet, id)
+    inds = qpn.qps[id].var_indices
+    for i in qpn.reachable_nodes[id]
+        append!(inds, qpn.qps[i].var_indices)
+    end
+    Set(inds) |> collect |> sort
+end
+
 function fair_obj(qep::QEP)
     sum([qp.f for qp in values(qep.qps)])
 end

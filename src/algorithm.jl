@@ -86,10 +86,8 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
     
     if level == num_levels(qpn)
         start = time()
-        qep = gather(qpn, level)
-        (; x_opt, Sol) = solve_qep(qep, x_init, request, relaxable_inds; 
+        (; x_opt, Sol) = solve_qep(qpn, level, x_init, request, relaxable_inds; 
                                    qpn.var_indices,
-                                   level,
                                    qpn.options.debug, 
                                    qpn.options.high_dimension, 
                                    qpn.options.shared_variable_mode, 
@@ -102,10 +100,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
     else
         x = copy(x_init)
         fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
-        qep = gather(qpn, level)
-        level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ qp.constraint_indices] for id in keys(qep.constraints))...)
-        sub_inds = sub_indices(qpn, level)
-        param_inds = param_indices(qpn, level)
+        #level_constraint_ids = vcat(([id for qp in values(qep.qps) if id ∈ qp.constraint_indices] for id in keys(qep.constraints))...)
 
         for iters in 1:qpn.options.max_iters
             ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng)
@@ -153,9 +148,8 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 low_feasible = x ∈ PU
                 @infiltrate
                 try 
-                    res = solve_qep(qep, x, request, relaxable_inds, H, sub_inds;
+                    res = solve_qep(qpn, level, x, request, relaxable_inds, H, sub_inds;
                                     qpn.var_indices,
-                                    level,
                                     subpiece_index=0,
                                     request_comes_from_parent,
                                     qpn.options.debug,
@@ -198,9 +192,8 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 S_keep = simplify(S)
                 low_feasible |= (x ∈ S_keep)
                 try
-                    res = solve_qep(qep, x, request, relaxable_inds, S_keep, sub_inds;
+                    res = solve_qep(qpn, level, x, request, relaxable_inds, S_keep, sub_inds;
                                     qpn.var_indices,
-                                    level,
                                     subpiece_index=e,
                                     request_comes_from_parent,
                                     qpn.options.debug,

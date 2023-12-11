@@ -5,7 +5,7 @@ f2: (x2+1)²
 f3: (x3)²
 C3: { x : x2 - x1 - x3 ≥ 0 }
 """
-function setup(::Val{:simple_bilevel}; kwargs...)
+function setup(::Val{:simple_network}; kwargs...)
     
     x = Symbolics.variables(:x, 1:3)
     
