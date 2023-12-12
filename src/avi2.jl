@@ -161,16 +161,6 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
     end
     total = n_total+n
 
-
-    #A, l, u = mapreduce(vcat, qp.constraint_indices) do ci
-    #    (; A, l, u) = vectorize(qp_net.constraints[ci].poly)
-    #    for i in 1:size(A,1)
-    #        labels["λ_$(id)_$(ci)_$i"] = total+i
-    #    end
-    #    total += size(A,1)
-    #    A, l, u
-    #end |> (x->vcat.(x...))
-    
     A,l,u = map(qp.constraint_indices) do ci
         (; A, l, u) = vectorize(qp_net.constraints[ci].poly)
         for i in 1:size(A,1)
@@ -197,6 +187,10 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
     u2 = [u; u_Si]
 
     (; dvars, labels, M1, q1, M2, l2, u2)
+end
+
+function finalize_gavi(labeled_gavi)
+    
 end
 
 
@@ -309,13 +303,11 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
     # TODO : if I want to support successive minimization of ||ψ|| over
     # iterations, need to properly warmstart with previous solution? Might
     # require reducing dimension AFTER psi minimization
-
     (; z, status) = solve_gavi(gavi, z0, w)
-
     @infiltrate # Code runs up until this new point. Need to change below
 
     if status != SUCCESS
-        relaxable_parent_inds = setdiff(relaxable_inds, decision_inds)
+        relaxable_parent_inds = setdiff(relaxable_inds, dec_inds)
         relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
         if !isempty(relaxable_parent_inds) && request_comes_from_parent
             debug && @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
@@ -335,61 +327,34 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
             error("AVI solve error!")
         end
     end
+
+    #ξ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
+
+    @debug "Found solution, now generating solution map (level $(level))"
+    x_opt = copy(x)
+    x_opt[dec_inds] = z[1:length(dec_inds)]
+    x_opt[param_inds] = w
     
+    # TODO figure out request structure with vertex expansion (is
+    # v-enum even required?)
 
-    ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
-
-    if high_dimension
-        throw(error("High dimension mode not supported at the moment"))
-        extra_rounds = level==1 ? 0 : 5
-        z_orig = z
-        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,level,subpiece_index,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
-        z_inds_remaining = setdiff(1:length(z), reduced_inds)
-        z = z[z_inds_remaining] 
-        if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM
-            ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
-            f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
-            (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
-        end
-	    @infiltrate !([z;w] in piece)
-	    xz_permuted = zeros(length(z)+length(w))
-	    xz_permuted[decision_inds] = z[1:length(decision_inds)]
-	    xz_permuted[param_inds] = w
-	    xz_permuted[length(decision_inds)+length(param_inds)+1:end] = z[length(decision_inds)+1:end]
-        permute!(piece, decision_inds, param_inds)
-	    @infiltrate !(xz_permuted in piece)
-        reduced_piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
-	    @infiltrate !(x_opt in reduced_piece)
-        @infiltrate embedded_dim(reduced_piece) > length(x_opt)
-        (; x_opt, Sol=[reduced_piece,], identified_request=nothing)
+    if gen_sol
+        Sol = Dict(id => LocalGAVISolutions(finalize_gavi(labeled_gavis[id]), z, w, level, subpiece_index, dec_inds, param_inds, request; max_vertices=1000) for id in player_pool)
     else
-        if shared_variable_mode == MIN_NORM
-            @error "not implemented yet" 
-        elseif shared_variable_mode == SHARED_DUAL
-            @debug "Found solution, now generating solution map (level $(level))"
-            x_opt = copy(x)
-            x_opt[decision_inds] = z[1:length(decision_inds)]
-            x_opt[param_inds] = w
-
-            # TODO figure out request structure with vertex expansion (is
-            # v-enum even required?)
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 1000) : nothing
-            @debug "Solution map generated."
-
-            # TODO : should probably propagate any parent level requests if
-            # they appear in S 
-
-            if isnothing(S) || !make_requests
-                identified_request = Set{Linear}()
-            else
-                S_duals = z[S_dual_inds]
-                identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
-            end
-            (; x_opt, Sol, identified_request)
-        else
-            @error "Invalid shared variable mode: $shared_variable_mode."
-        end
+        Sol = nothing
     end
+    @debug "Solution map generated."
+
+    # TODO : should probably propagate any parent level requests if
+    # they appear in S 
+
+    if isnothing(S) || !make_requests || true # not dealing with requests right now
+        identified_request = Set{Linear}()
+    else
+        S_duals = z[S_dual_inds]
+        identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
+    end
+    (; x_opt, Sol, identified_request)
 end
 
 function identify_request(S, λs, parent_request; propagate=false)

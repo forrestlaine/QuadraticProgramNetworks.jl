@@ -24,7 +24,7 @@ include("intersection.jl")
 include("programs.jl")
 include("algorithm.jl")
 include("avi2.jl")
-include("avi_solutions.jl")
+include("avi_solutions2.jl")
 include("printing.jl")
 
 include("../examples/bilevel_escape.jl")
