@@ -572,4 +572,4 @@ function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4
         J[key+d1] = Set(value .+ 4)
     end
     J
-e
+end

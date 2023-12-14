@@ -190,7 +190,43 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
 end
 
 function finalize_gavi(labeled_gavi)
-    
+    # M1 [x; ξ; λ; ψ] + q1 = 0
+    # [λ; ψ] ⟂ l2 ≤ M2 x ≤ u2
+   
+    labels = labeled_gavi.labels
+    x_dims = [i for (i,l) in labels if startswith(l, "x")] |> sort
+    dvars = labeled_gavi.dvars
+    pvars = setdiff(1:length(x_dims), dvars)
+    dec_dims = x_dims[dvars]
+    param_dims = x_dims[pvars]
+    ξ_dims = [i for (i,l) in labels if startswith(l, "ξ")] |> sort
+    λ_dims = [i for (i,l) in labels if startswith(l, "λ")] |> sort
+    ψ_dims = [i for (i,l) in labels if startswith(l, "ψ")] |> sort
+    main_dims = [dec_dims; λ_dims; ψ_dims]
+    sec_dims = [param_dis; ξ_dims]
+
+    M = labeled_gavi.M1[:, main_dims]
+    n = length(main_dims)
+    N = labeled_gavi.M1[:, sec_dims]
+    o = labeled_gavi.q1
+    l1 = fill(-Inf, length(o))
+    u1 = fill(+Inf, length(o))
+
+    m = length(labeled_gavi.l2)
+    A = [labeled_gavi.M2[:, dec_dims] spzeros(m, n-length(dvars))]
+    B = [labeled_gavi.M2[:, param_dims] spzeros(m, length(ξ_dims))]
+    l2 = labeled_gavi.l2
+    u2 = labeled_gavi.u2
+
+    x_locations = map(1:length(x_dims)) do i
+        if i in dvars
+            (1,dec_dims[findfirst(dvars .== i)])
+        else
+            (2,param_dims[findfirst(pvars .== i)])
+        end
+    end
+
+    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
 end
 
 
@@ -339,6 +375,10 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
     # v-enum even required?)
 
     if gen_sol
+        Sol = Dict()
+        for id in player_pool
+            single_gavi, x_locations = finalize_gavi(labeled_gavis[id])
+
         Sol = Dict(id => LocalGAVISolutions(finalize_gavi(labeled_gavis[id]), z, w, level, subpiece_index, dec_inds, param_inds, request; max_vertices=1000) for id in player_pool)
     else
         Sol = nothing
