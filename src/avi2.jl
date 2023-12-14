@@ -21,6 +21,7 @@ Represents a generalized affine variational inequality
 
 (Mz + Nw + o) ⟂ (l₁ ≤  z₁   ≤ u₁)
 (     z₂    ) ⟂ (l₂ ≤ Az+Bw ≤ u₂)
+z = [z₁; z₂]
 
 Possible todo: add support for following conditions.
 (M₃z + N₃w + o₃) ⟂ (l₃ ≤ A₃z+B₃w ≤ u₃)
@@ -35,6 +36,20 @@ struct GAVI
     B::SparseMatrixCSC{Float64, Int32}
     l2::Vector{Float64}
     u2::Vector{Float64}
+end
+
+"""
+Represents a general linear complementarity problem.
+M z + q ⟂ l ≤ Az ≤ u
+
+Here, z need not be of the same dimension as q, l, or u.
+"""
+struct GLCP
+    M::SparseMatrixCSC{Float64, Int32}
+    q::Vector{Float64}
+    A::SparseMatrixCSC{Float64, Int32}
+    l::Vector{Float64}
+    u::Vector{Float64}
 end
 
 """
@@ -189,45 +204,50 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
     (; dvars, labels, M1, q1, M2, l2, u2)
 end
 
-function finalize_gavi(labeled_gavi)
-    # M1 [x; ξ; λ; ψ] + q1 = 0
-    # [λ; ψ] ⟂ l2 ≤ M2 x ≤ u2
-   
-    labels = labeled_gavi.labels
-    x_dims = [i for (i,l) in labels if startswith(l, "x")] |> sort
-    dvars = labeled_gavi.dvars
-    pvars = setdiff(1:length(x_dims), dvars)
-    dec_dims = x_dims[dvars]
-    param_dims = x_dims[pvars]
-    ξ_dims = [i for (i,l) in labels if startswith(l, "ξ")] |> sort
-    λ_dims = [i for (i,l) in labels if startswith(l, "λ")] |> sort
-    ψ_dims = [i for (i,l) in labels if startswith(l, "ψ")] |> sort
-    main_dims = [dec_dims; λ_dims; ψ_dims]
-    sec_dims = [param_dis; ξ_dims]
-
-    M = labeled_gavi.M1[:, main_dims]
-    n = length(main_dims)
-    N = labeled_gavi.M1[:, sec_dims]
-    o = labeled_gavi.q1
-    l1 = fill(-Inf, length(o))
-    u1 = fill(+Inf, length(o))
-
-    m = length(labeled_gavi.l2)
-    A = [labeled_gavi.M2[:, dec_dims] spzeros(m, n-length(dvars))]
-    B = [labeled_gavi.M2[:, param_dims] spzeros(m, length(ξ_dims))]
-    l2 = labeled_gavi.l2
-    u2 = labeled_gavi.u2
-
-    x_locations = map(1:length(x_dims)) do i
-        if i in dvars
-            (1,dec_dims[findfirst(dvars .== i)])
-        else
-            (2,param_dims[findfirst(pvars .== i)])
-        end
-    end
-
-    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
-end
+#function finalize_gavi(n, labeled_gavi)
+#    # M1 [x; ξ; λ; ψ] + q1 = 0
+#    # [λ; ψ] ⟂ l2 ≤ M2 x ≤ u2
+#   
+#    labels = labeled_gavi.labels
+#    x_locations = map(1:n) do i
+#        labels["x_$i"]
+#    end
+#    dec_inds = labeled_gavi.dvars
+#    param_inds = setdiff(1:n, dec_inds)
+#    dec_locations = x_locations[dec_inds]
+#    param_locations = x_locations[param_inds]
+#    ξ_locations = [i for (l,i) in labels if startswith(l, "ξ")]
+#    λ_locations = [i for (l,i) in labels if startswith(l, "λ")]
+#    ψ_locations = [i for (l,i) in labels if startswith(l, "ψ")]
+#    main_locations = [dec_locations; λ_locations; ψ_locations]
+#    sec_locations = [param_locations; ξ_locations]
+#
+#    M = labeled_gavi.M1[:, main_locations]
+#    n = length(main_locations)
+#    N = labeled_gavi.M1[:, sec_locations]
+#    o = labeled_gavi.q1
+#    l1 = fill(-Inf, length(o))
+#    u1 = fill(+Inf, length(o))
+#
+#    m = length(labeled_gavi.l2)
+#    A = [labeled_gavi.M2[:, dec_inds] spzeros(m, n-length(dec_inds))]
+#    B = [labeled_gavi.M2[:, param_inds] spzeros(m, length(ξ_locations))]
+#    l2 = labeled_gavi.l2
+#    u2 = labeled_gavi.u2
+#
+#    x_locations = map(1:n) do i
+#        dec_i = findfirst(dec_inds .== i)
+#        if !isnothing(dec_i)
+#            (:primary,dec_i)
+#        else
+#            param_i = findfirst(param_inds .== i)
+#            (:secondary,param_i)
+#        end
+#    end
+#
+#    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
+#    gavi, x_locations
+#end
 
 
 """
@@ -328,8 +348,10 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
     dec_inds = union((decision_inds(qp_net, id) for id in player_pool)...) |> sort
     param_inds = setdiff(1:x_dim, dec_inds)
 
-    labeled_gavis = Dict(id=>create_labeled_gavi_from_qp(qp_net, id, S) for id in player_pool)
-    gavi = combine_gavis(x_dim, dec_inds, param_inds, labeled_gavis)
+    glcps, z_labels = create_glcps_from_qps(qp_net, player_pool, S)
+    gavi = combine_glcps(glcps, z_labels, dec_inds, param_inds)
+    #labeled_gavis = Dict(id=>create_labeled_gavi_from_qp(qp_net, id, S) for id in player_pool)
+    #gavi = combine_gavis(x_dim, dec_inds, param_inds, labeled_gavis)
 
     w = x[param_inds]
 
@@ -340,7 +362,6 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
     # iterations, need to properly warmstart with previous solution? Might
     # require reducing dimension AFTER psi minimization
     (; z, status) = solve_gavi(gavi, z0, w)
-    @infiltrate # Code runs up until this new point. Need to change below
 
     if status != SUCCESS
         relaxable_parent_inds = setdiff(relaxable_inds, dec_inds)
@@ -377,7 +398,9 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
     if gen_sol
         Sol = Dict()
         for id in player_pool
-            single_gavi, x_locations = finalize_gavi(labeled_gavis[id])
+            single_gavi, x_locations = finalize_gavi(x_dim, labeled_gavis[id], z, w)
+            sols = LocalGAVISolutions(single_gavi, z, w, level, subpiece_index, x_locations, request; max_vertices=0)
+        end
 
         Sol = Dict(id => LocalGAVISolutions(finalize_gavi(labeled_gavis[id]), z, w, level, subpiece_index, dec_inds, param_inds, request; max_vertices=1000) for id in player_pool)
     else

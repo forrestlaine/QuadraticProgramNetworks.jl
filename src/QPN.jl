@@ -33,6 +33,7 @@ include("../examples/repeated_variable_control.jl")
 include("../examples/simple_bilevel.jl")
 include("../examples/simple_network.jl")
 include("../examples/robust_constrained.jl")
+include("../examples/rock_paper_scissors.jl")
 
 export Poly, QP, Constraint, Quadratic, QPNet, solve, setup
 
