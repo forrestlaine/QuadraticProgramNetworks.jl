@@ -85,18 +85,48 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
         rng=MersenneTwister())
     
     if level == num_levels(qpn)
-        start = time()
-        (; x_opt, Sol) = solve_qep(qpn, level, x_init, request, relaxable_inds; 
-                                   qpn.var_indices,
-                                   qpn.options.debug, 
-                                   qpn.options.high_dimension, 
-                                   qpn.options.shared_variable_mode, 
-                                   gen_sol=(num_levels(qpn)==1) ? qpn.options.gen_solution_map : true,
-                                   rng)
-        fin = time()
-        qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
-        qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
-        return (; x_opt, Sol, identified_request=Set{Linear}(), x_alts=Vector{Float64}[])
+
+        players_at_level = qpn.network_depth_map[level]
+        processing_tasks = map(players_at_level) do id
+            Threads.@spawn process_qp(qpn, id, x_init)
+        end
+        results = fetch.(processing_tasks)
+        equilibrium = true
+        subpiece_assignments = Dict{Int, Int}()
+        S = Dict{Int, SolutionGraph}()
+        for (i,id) in enumerate(players_at_level)
+            r = results[i]
+            if !r.solution
+                equilibrium = false
+                for (child_id,subpiece_id) in r.subpiece_assignments
+                    # Even if another player has already indicated that at least
+                    # one subpiece for this particular child (which current
+                    # player also parents) results in non-equilibrium,
+                    # we choose to overwrite with subpiece causing
+                    # discontentment for current player.
+                    subpiece_assignments[child_id] = subpiece_id
+                end
+            else
+                S[id] = results[i].S
+            end
+        end
+        if !equilibrium
+            x = compute_equilibrium(qpn, players_at_level, x_init, subpiece_assignments)
+            solve(
+         
+
+        #start = time()
+        #(; x_opt, Sol) = solve_qep(qpn, level, x_init, request, relaxable_inds; 
+        #                           qpn.var_indices,
+        #                           qpn.options.debug, 
+        #                           qpn.options.high_dimension, 
+        #                           qpn.options.shared_variable_mode, 
+        #                           gen_sol=(num_levels(qpn)==1) ? qpn.options.gen_solution_map : true,
+        #                           rng)
+        #fin = time()
+        #qpn.options.debug && println("Level ", level, " took ", fin-start, " seconds.")
+        #qpn.options.debug && display_debug(level, 1, x_opt, nothing, nothing)
+        #return (; x_opt, Sol, identified_request=Set{Linear}(), x_alts=Vector{Float64}[])
     else
         x = copy(x_init)
         fair_objective = fair_obj(qpn, level) # TODO should fair_objective still be used for all shared_var modes?
@@ -301,29 +331,5 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             return (; x_opt=x, Sol=S, identified_request, x_alts=non_local_xs)
         end
         error("Can't find solution.")
-    end
-end
-
-"""
-Conustructs the solution set
-S := ⋃ₚ ⋂ᵢ Zᵢᵖ
-
-Zᵢᵖ ∈ { Rᵢ', Sᵢ }
-where Rᵢ' is the set complement of Rᵢ.
-"""
-function combine(regions, solutions, level_dim; show_progress=true)
-    if length(solutions) == 0
-        error("No solutions to combine... length solutions: 0, length regions: $(length(regions))")
-    elseif length(solutions) == 1
-        PolyUnion(collect(first(solutions)))
-    else
-        complements = map(complement, regions)
-        it = 0
-        combined = map(zip(solutions, complements)) do (s, rc)
-            it += 1
-            PolyUnion([collect(s); rc.polys])
-        end
-        #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
-        IntersectionRoot(combined, length.(complements), level_dim; show_progress)
     end
 end

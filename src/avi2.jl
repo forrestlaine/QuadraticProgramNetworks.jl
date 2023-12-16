@@ -157,6 +157,53 @@ function check_avi_solution(avi, z, w; tol=1e-6)
     return (; sol_bad = bad_count > 0, degree = bad_count, r)
 end
 
+function create_glcps_from_qps(qp_net, id, solution_graphs)
+    dvars = decision_inds(qp_net, id) 
+    n = length(dvars)
+    qp = qp_net.qps[id]
+    n_total = size(qp.f.Q,2)
+    
+    # Z = [x; ξᵢ; λᵢ; ψᵢ]
+    # cons = [M1*Z + q1 ⟂ l1 ≤ ξᵢ   ≤ u1;
+    #        [[λᵢ; ψᵢ]  ⟂ l2 ≤ M2*Z ≤ u2]
+    
+    labels = Dict{String, Int}()
+    for i in 1:n_total
+        labels["x_$i"] = i
+    end
+    for (e,i) in enumerate(dvars)
+        labels["ξ_$(id)_$(i)"] = n_total+e
+    end
+    total = n_total+n
+
+    A,l,u = map(qp.constraint_indices) do ci
+        (; A, l, u) = vectorize(qp_net.constraints[ci].poly)
+        for i in 1:size(A,1)
+            labels["λ_$(id)_$(ci)_$i"] = total+i
+        end
+        total += size(A,1)
+        A, l, u
+    end |> (x->vcat.(x...))
+
+    A_Si, l_Si, u_Si = isempty(qp_net.network_edges[id]) ? (spzeros(0, n_total), zeros(0), zeros(0)) :
+    map(collect(qp_net.network_edges[id])) do j
+        (; A, l, u) = vectorize(solution_graphs[j])        
+        for i in 1:size(A,1)
+            labels["ψ_$(id)_$(j)_$i"] = total+i
+        end
+        total += size(A,1)
+        A, l, u
+    end |> (x->vcat.(x...))
+    
+    M1 = [qp.f.Q[dvars, :] -sparse(I, n, n) -A[:,dvars]' -A_Si[:,dvars]']
+    q1 = qp.f.q[dvars]
+    M2 = [A; A_Si]
+    l2 = [l; l_Si]
+    u2 = [u; u_Si]
+
+    (; dvars, labels, M1, q1, M2, l2, u2)
+end
+
 function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
     dvars = decision_inds(qp_net, id) 
     n = length(dvars)

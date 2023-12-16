@@ -6,10 +6,10 @@ mutable struct IntersectionNode
     width::Int
     depth::Int
     empty::Bool
-    level_dim::Int
-    IntersectionNode(pus::Vector{PolyUnion}, depth, level_dim, state) = begin
+    central_point::Vector{Float64} 
+    IntersectionNode(pus::Vector{PolyUnion}, depth, central_point, state) = begin
         width = depth > length(pus) ? 0 : length(pus[depth])
-        new(pus, pus[depth-1][state[depth-1]], missing, IntersectionNode[], width, depth, false, level_dim)
+        new(pus, pus[depth-1][state[depth-1]], missing, IntersectionNode[], width, depth, false, central_point)
     end
 end
 
@@ -23,7 +23,7 @@ mutable struct IntersectionRoot
     depth_widths::Vector{Int}  # width i is total number of leaf nodes at or below any node at corresponding level 
     len::Int
     red_lengths::Vector{Int}
-    level_dim::Int
+    central_point::Vector{Float64} 
     guide::Function
 end
 
@@ -52,7 +52,7 @@ function set_guide!(root::IntersectionRoot, guide)
     return
 end
 
-function IntersectionRoot(pus::Vector{PolyUnion}, red_lengths, level_dim; show_progress=false)
+function IntersectionRoot(pus::Vector{PolyUnion}, red_lengths, central_point; show_progress=false)
     @assert(length(pus) > 1)
     N = length(pus)
     pu_lengths = length.(pus)
@@ -60,7 +60,7 @@ function IntersectionRoot(pus::Vector{PolyUnion}, red_lengths, level_dim; show_p
     depth_widths = [prod(pu_lengths[i+1:end]; init=1) for i in 1:N]
     children = IntersectionNode[]
     pms = [Progress(length(pu); desc="Depth "*string(i)*": ", dt=0.1, offset=i) for (i,pu) ∈ enumerate(pus)]
-    IntersectionRoot(pus, pms, show_progress, children, pu_lengths[1], 0, depth_widths, prod(pu_lengths), red_lengths, level_dim, x->Inf)
+    IntersectionRoot(pus, pms, show_progress, children, pu_lengths[1], 0, depth_widths, prod(pu_lengths), red_lengths, central_point, x->Inf)
 end
 
 function get_next!(node::IntersectionNode, parent_poly, state)
@@ -70,7 +70,7 @@ function get_next!(node::IntersectionNode, parent_poly, state)
         else
             node.resulting_poly = poly_intersect(node.contributing_poly, parent_poly)
         end
-        if isempty(node.resulting_poly) || intrinsic_dim(node.resulting_poly) < node.level_dim
+        if node.central_point ∉ node.resulting_poly # || intrinsic_dim(node.resulting_poly) < node.level_dim
             node.empty = true
         end
     end
@@ -78,7 +78,8 @@ function get_next!(node::IntersectionNode, parent_poly, state)
         return nothing
     end
     if node.depth > length(state)
-        if intrinsic_dim(node.resulting_poly) ≥ node.level_dim
+        if node.central_point ∈ node.resulting_poly
+        #if intrinsic_dim(node.resulting_poly) ≥ node.level_dim
             return node.resulting_poly 
         else
             node.empty = true
@@ -87,7 +88,7 @@ function get_next!(node::IntersectionNode, parent_poly, state)
     else
         while state[node.depth] ≤ node.width
             if state[node.depth] > length(node.children)
-                push!(node.children, IntersectionNode(node.pus, node.depth+1, node.level_dim, state))
+                push!(node.children, IntersectionNode(node.pus, node.depth+1, node.central_point, state))
             end
             poly = get_next!(node.children[state[node.depth]], node.resulting_poly, state)
             if isnothing(poly)
@@ -114,7 +115,7 @@ end
 function Base.iterate(root::IntersectionRoot, state)
     while state[1] ≤ root.width
         if state[1] > length(root.children)
-            push!(root.children, IntersectionNode(root.pus, 2, root.level_dim, state))
+            push!(root.children, IntersectionNode(root.pus, 2, root.central_point, state))
         end
         poly = get_next!(root.children[state[1]], nothing, state)
         full_lengths = length.(root.pus)
