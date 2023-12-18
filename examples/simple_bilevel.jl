@@ -17,13 +17,14 @@ function setup(::Val{:simple_bilevel}; kwargs...)
     con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
            
     cost = (y-x)^2
-    level = 2
-    QPN.add_qp!(qp_net, level, cost, [con_id,], y)
+    qp_id1 = QPN.add_qp!(qp_net, cost, [con_id,], y)
 
     cost = ([x;y] - w)'*([x; y] - w)
-    level = 1
-    QPN.add_qp!(qp_net, level, cost, [], x)
-    
+    qp_id2 = QPN.add_qp!(qp_net, cost, [], x)
+   
+    edge_list = [(qp_id2, qp_id1)]
+
+    QPN.add_edges!(qp_net, edge_list)
     QPN.assign_constraint_groups!(qp_net)
     QPN.set_options!(qp_net; kwargs...)
     qp_net

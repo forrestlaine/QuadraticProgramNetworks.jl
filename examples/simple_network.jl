@@ -19,22 +19,22 @@ function setup(::Val{:simple_network}; kwargs...)
     cost_1 = (x[1])^2 + (x[2]-1)^2
     dvars_1 = [x[1],]
     con_ids_1 = []
-    QPN.add_qp!(qp_net, cost_1, con_ids_1, dvars_1...)
+    qp_id1 = QPN.add_qp!(qp_net, cost_1, con_ids_1, dvars_1...)
     
     cost_2 = (x[2]+1)^2
     dvars_2 = [x[2],]
     con_ids_2 = []
-    QPN.add_qp!(qp_net, cost_2, con_ids_2, dvars_2...)
+    qp_id2 = QPN.add_qp!(qp_net, cost_2, con_ids_2, dvars_2...)
     
     cost_3 = (x[3])^2
     dvars_3 = [x[2],x[3]]
     con_ids_3 = [con_id,]
-    QPN.add_qp!(qp_net, cost_3, con_ids_3, dvars_3...)
+    qp_id3 = QPN.add_qp!(qp_net, cost_3, con_ids_3, dvars_3...)
 
-    edge_list_v1 = [(2,3)]
-    edge_list_v2 = [(1,3),(2,3)]
+    edge_list_v1 = [(qp_id2,qp_id3)]
+    edge_list_v2 = [(qp_id1,qp_id3),(qp_id2,qp_id3)]
 
-    QPN.add_edges!(qp_net, edge_list_v1)
+    QPN.add_edges!(qp_net, edge_list_v2)
     QPN.assign_constraint_groups!(qp_net)
     QPN.set_options!(qp_net; kwargs...)
     

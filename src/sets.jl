@@ -494,7 +494,7 @@ end
 Project the poly into lower embedded dimension.
 """
 function project(p::Poly, keep_dims; tol=1e-6)
-    hr = get_Polyhedron_hrep(simplify(p); tol)
+    hr = get_Polyhedron_hrep(p; tol)
     poly = Polyhedra.polyhedron(hr)
     vr = vrep(poly)
 

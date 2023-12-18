@@ -63,7 +63,7 @@ Currently uses PATHSolver
 function solve_avi(avi::AVI, z0, w)
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
-                                                   silent=false, 
+                                                   silent=true, 
                                                    convergence_tolerance=1e-8, 
                                                    cumulative_iteration_limit=100000,
                                                    restart_limits=5,
@@ -223,7 +223,8 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
     end
     total = n_total+n
 
-    A,l,u = map(qp.constraint_indices) do ci
+    A,l,u = length(qp.constraint_indices) == 0 ? (spzeros(0, n_total), zeros(0), zeros(0)) :
+    map(qp.constraint_indices) do ci
         (; A, l, u) = vectorize(qp_net.constraints[ci].poly)
         for i in 1:size(A,1)
             labels["λ_$(id)_$(ci)_$i"] = total+i
@@ -336,7 +337,7 @@ function combine_gavis(n, dec_inds, param_inds, labeled_gavis)
         Mi = spzeros(size(M,1), nd+total_dual_dim)
         Mi[:,1:nd] = M[:, dec_inds]
 
-        Mi[:,nd.+ξ_offset_ranges[id]] = M[:,n+1:n+ξ_dim]
+        Mi[:,nd.+ξ_offset_ranges[id]] = 0 * M[:,n+1:n+ξ_dim]
         Mi[:,nd.+λψ_offset_ranges[id]] = M[:,n+ξ_dim+1:end]
         Ni = M[:,param_inds]
 
@@ -378,7 +379,7 @@ end
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(), shared_decision_inds=Vector{Int}();
+function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
                    var_indices=nothing,
                    subpiece_index=0,
                    debug=false,
@@ -390,18 +391,15 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
                    rng=MersenneTwister(1))
 
     x_dim = length(x)
-    player_pool = qp_net.network_depth_map[level]
-
     dec_inds = union((decision_inds(qp_net, id) for id in player_pool)...) |> sort
     param_inds = setdiff(1:x_dim, dec_inds)
 
-    glcps, z_labels = create_glcps_from_qps(qp_net, player_pool, S)
-    gavi = combine_glcps(glcps, z_labels, dec_inds, param_inds)
-    #labeled_gavis = Dict(id=>create_labeled_gavi_from_qp(qp_net, id, S) for id in player_pool)
-    #gavi = combine_gavis(x_dim, dec_inds, param_inds, labeled_gavis)
+    #glcps, z_labels = create_glcps_from_qps(qp_net, player_pool, S)
+    #gavi = combine_glcps(glcps, z_labels, dec_inds, param_inds)
+    labeled_gavis = Dict(id=>create_labeled_gavi_from_qp(qp_net, id, S) for id in player_pool)
+    gavi = combine_gavis(x_dim, dec_inds, param_inds, labeled_gavis)
 
     w = x[param_inds]
-
     #       decision_vars       aux_vars                ψ vars                      dual_vars
     z0 = [x[dec_inds]; zeros(size(gavi.M,2)-length(dec_inds))]
 
@@ -432,39 +430,75 @@ function solve_qep(qp_net, level, x, request, relaxable_inds, S=Dict{Int, Poly}(
         end
     end
 
-    #ξ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
-
+    num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)
+    ξ = z[length(dec_inds)+1:length(dec_inds)+num_ξ]
+    @infiltrate norm(ξ) > 1e-3
+    
     @debug "Found solution, now generating solution map (level $(level))"
     x_opt = copy(x)
     x_opt[dec_inds] = z[1:length(dec_inds)]
     x_opt[param_inds] = w
+    return x_opt
     
-    # TODO figure out request structure with vertex expansion (is
-    # v-enum even required?)
+    ## TODO figure out request structure with vertex expansion (is
+    ## v-enum even required?)
 
-    if gen_sol
-        Sol = Dict()
-        for id in player_pool
-            single_gavi, x_locations = finalize_gavi(x_dim, labeled_gavis[id], z, w)
-            sols = LocalGAVISolutions(single_gavi, z, w, level, subpiece_index, x_locations, request; max_vertices=0)
-        end
+    #if gen_sol
+    #    Sol = Dict()
+    #    for id in player_pool
+    #        single_gavi, x_locations = finalize_gavi(x_dim, labeled_gavis[id], z, w)
+    #        sols = LocalGAVISolutions(single_gavi, z, w, level, subpiece_index, x_locations, request; max_vertices=0)
+    #    end
 
-        Sol = Dict(id => LocalGAVISolutions(finalize_gavi(labeled_gavis[id]), z, w, level, subpiece_index, dec_inds, param_inds, request; max_vertices=1000) for id in player_pool)
-    else
-        Sol = nothing
-    end
-    @debug "Solution map generated."
+    #    Sol = Dict(id => LocalGAVISolutions(finalize_gavi(labeled_gavis[id]), z, w, level, subpiece_index, dec_inds, param_inds, request; max_vertices=1000) for id in player_pool)
+    #else
+    #    Sol = nothing
+    #end
+    #@debug "Solution map generated."
 
-    # TODO : should probably propagate any parent level requests if
-    # they appear in S 
+    ## TODO : should probably propagate any parent level requests if
+    ## they appear in S 
 
-    if isnothing(S) || !make_requests || true # not dealing with requests right now
-        identified_request = Set{Linear}()
-    else
-        S_duals = z[S_dual_inds]
-        identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
-    end
-    (; x_opt, Sol, identified_request)
+    #if isnothing(S) || !make_requests || true # not dealing with requests right now
+    #    identified_request = Set{Linear}()
+    #else
+    #    S_duals = z[S_dual_inds]
+    #    identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
+    #end
+    #(; x_opt, Sol, identified_request)
+end
+
+
+function process_solution_graph(qp, constraints, dec_inds, x, λ)
+    n = length(qp.f.q)
+    param_inds = setdiff(1:n, dec_inds)
+    nd = length(dec_inds)
+    np = length(param_inds)
+    z = [x[dec_inds]; λ]
+    w = x[param_inds]
+
+    AA, l2, u2 = isempty(constraints) ? (spzeros(0, n), zeros(0), zeros(0)) :
+    map(constraints) do poly
+        (; A, l, u) = vectorize(poly)
+        A, l, u
+    end |> (x-> vcat.(x...))
+
+    m = length(l2)
+    
+    # z = [x_d λ]; w = [x_p]
+    # Q*xd + q - A'*λ ⟂ -∞ ≤ xd ≤ ∞
+    # λ               ⟂ l  ≤ Axd + Bxp ≤ u
+
+    M = [qp.f.Q[dec_inds, dec_inds] -AA[:,dec_inds]']
+    N = qp.f.Q[dec_inds, param_inds]
+    o = qp.f.q[dec_inds]
+    l1 = fill(-Inf, nd)
+    u1 = fill(+Inf, nd)
+    A = [AA[:,dec_inds] spzeros(m,m)]
+    B = AA[:,param_inds]
+
+    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2) 
+    LocalGAVISolutions(gavi, z, w, 0, 0, dec_inds, param_inds, Set{Linear}(); max_vertices=0)
 end
 
 function identify_request(S, λs, parent_request; propagate=false)

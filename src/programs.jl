@@ -317,7 +317,7 @@ function gather(qpn::QPNet, level)
 end
 
 function decision_inds(qpn::QPNet, id)
-    inds = qpn.qps[id].var_indices
+    inds = copy(qpn.qps[id].var_indices)
     for i in qpn.reachable_nodes[id]
         append!(inds, qpn.qps[i].var_indices)
     end

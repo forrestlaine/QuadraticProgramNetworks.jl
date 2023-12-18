@@ -449,7 +449,8 @@ function local_piece(gavi::GAVI, n, m, K, level, subpiece_index; reducible_inds=
     end
 
     meaningful = find_non_trivial(A,l,u,reduced_inds)
-    (; piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful])), reduced_inds)
+    piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful]))
+    (; piece, reduced_inds)
 end
 
 """
@@ -513,6 +514,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
         end
         J[i] = Set(Ji)
     end
+    @infiltrate length(w) == 0
 
     #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
     #J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
