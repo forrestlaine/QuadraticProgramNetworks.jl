@@ -70,7 +70,6 @@ function solve_avi(avi::AVI, z0, w)
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
-        @infiltrate
         return (; z, status=FAILURE)
     end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
@@ -95,7 +94,6 @@ function find_closest_feasible!(gavi, z0, w)
     if ret.info.status_val == 1
         z0 .= ret.x
     else
-        @infiltrate
         @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
     end
 end
@@ -223,7 +221,7 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
     end
     total = n_total+n
 
-    A,l,u = length(qp.constraint_indices) == 0 ? (spzeros(0, n_total), zeros(0), zeros(0)) :
+    A_i,l_i,u_i = length(qp.constraint_indices) == 0 ? (spzeros(0, n_total), zeros(0), zeros(0)) :
     map(qp.constraint_indices) do ci
         (; A, l, u) = vectorize(qp_net.constraints[ci].poly)
         for i in 1:size(A,1)
@@ -242,12 +240,12 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
         total += size(A,1)
         A, l, u
     end |> (x->vcat.(x...))
-    
-    M1 = [qp.f.Q[dvars, :] -sparse(I, n, n) -A[:,dvars]' -A_Si[:,dvars]']
+
+    M1 = [qp.f.Q[dvars, :] -sparse(I, n, n) -A_i[:,dvars]' -A_Si[:,dvars]']
     q1 = qp.f.q[dvars]
-    M2 = [A; A_Si]
-    l2 = [l; l_Si]
-    u2 = [u; u_Si]
+    M2 = [A_i; A_Si]
+    l2 = [l_i; l_Si]
+    u2 = [u_i; u_Si]
 
     (; dvars, labels, M1, q1, M2, l2, u2)
 end
@@ -318,7 +316,7 @@ function combine_gavis(n, dec_inds, param_inds, labeled_gavis)
     offset1 = 0
     offset2 = total_ξ_dim
 
-    player_pool = collect(keys(labeled_gavis))
+    player_pool = collect(keys(labeled_gavis)) |> sort
 
     M, N, q = map(player_pool) do id
 
@@ -337,7 +335,7 @@ function combine_gavis(n, dec_inds, param_inds, labeled_gavis)
         Mi = spzeros(size(M,1), nd+total_dual_dim)
         Mi[:,1:nd] = M[:, dec_inds]
 
-        Mi[:,nd.+ξ_offset_ranges[id]] = 0 * M[:,n+1:n+ξ_dim]
+        Mi[:,nd.+ξ_offset_ranges[id]] =  M[:,n+1:n+ξ_dim]
         Mi[:,nd.+λψ_offset_ranges[id]] = M[:,n+ξ_dim+1:end]
         Ni = M[:,param_inds]
 
@@ -358,11 +356,13 @@ function combine_gavis(n, dec_inds, param_inds, labeled_gavis)
     top_M = spzeros(nd, size(M,2))
     top_N = spzeros(nd, size(N,2))
     top_q = zeros(nd)
-
+    
     for (id, lgavi) in labeled_gavis
         ξ_offset_range = ξ_offset_ranges[id]
-        for (di, d) in enumerate(lgavi.dvars)
-            top_M[di, nd+ξ_offset_range[lgavi.labels["ξ_$(id)_$d"]-n]] = 1.0
+        for (di, d) in enumerate(dec_inds)
+            if d in lgavi.dvars
+                top_M[di, nd+ξ_offset_range[lgavi.labels["ξ_$(id)_$d"]-n]] = 1.0
+            end
         end
     end
 
@@ -409,30 +409,34 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     (; z, status) = solve_gavi(gavi, z0, w)
 
     if status != SUCCESS
-        relaxable_parent_inds = setdiff(relaxable_inds, dec_inds)
-        relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
-        if !isempty(relaxable_parent_inds) && request_comes_from_parent
-            debug && @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
-            r_gavi = relax_gavi(gavi, relaxable_parent_inds)
-            r_z0 = [w[relaxable_parent_inds]; z0]
-            r_w = w[setdiff(1:length(w), relaxable_parent_inds)]
-            ret = solve_gavi(r_gavi, r_z0, r_w)
-            status = ret.status
-            if status != SUCCESS
-                error("AVI solve error, even after relaxing indices.")
-            end
-            l_r = length(relaxable_parent_inds)
-            w[relaxable_parent_inds] = ret.z[1:l_r]
-            z = ret.z[l_r+1:end]
-        else
-            @infiltrate
-            error("AVI solve error!")
-        end
+        error("AVI solve error!")
     end
+    #    relaxable_parent_inds = setdiff(relaxable_inds, dec_inds)
+    #    relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
+    #    if !isempty(relaxable_parent_inds) && request_comes_from_parent
+    #        debug && @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
+    #        r_gavi = relax_gavi(gavi, relaxable_parent_inds)
+    #        r_z0 = [w[relaxable_parent_inds]; z0]
+    #        r_w = w[setdiff(1:length(w), relaxable_parent_inds)]
+    #        ret = solve_gavi(r_gavi, r_z0, r_w)
+    #        status = ret.status
+    #        if status != SUCCESS
+    #            error("AVI solve error, even after relaxing indices.")
+    #        end
+    #        l_r = length(relaxable_parent_inds)
+    #        w[relaxable_parent_inds] = ret.z[1:l_r]
+    #        z = ret.z[l_r+1:end]
+    #    else
+    #        @infiltrate
+    #        error("AVI solve error!")
+    #    end
+    #end
 
     num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)
     ξ = z[length(dec_inds)+1:length(dec_inds)+num_ξ]
-    @infiltrate norm(ξ) > 1e-3
+    if norm(ξ) > 1e-3
+        error("Detected disagreement in the values of decision variables. It seems that two or more nodes are granted control of the same unrestricted decision variables. The handling of such conflicts is currently disabled.")
+    end
     
     @debug "Found solution, now generating solution map (level $(level))"
     x_opt = copy(x)
@@ -469,7 +473,7 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
 end
 
 
-function process_solution_graph(qp, constraints, dec_inds, x, λ)
+function process_solution_graph(qp, constraints, dec_inds, x, λ; exploration_vertices=0)
     n = length(qp.f.q)
     param_inds = setdiff(1:n, dec_inds)
     nd = length(dec_inds)
@@ -498,7 +502,7 @@ function process_solution_graph(qp, constraints, dec_inds, x, λ)
     B = AA[:,param_inds]
 
     gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2) 
-    LocalGAVISolutions(gavi, z, w, 0, 0, dec_inds, param_inds, Set{Linear}(); max_vertices=0)
+    LocalGAVISolutions(gavi, z, w, 0, 0, dec_inds, param_inds, Set{Linear}(); max_vertices=exploration_vertices)
 end
 
 function identify_request(S, λs, parent_request; propagate=false)

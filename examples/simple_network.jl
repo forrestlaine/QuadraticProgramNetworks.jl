@@ -5,7 +5,7 @@ f2: (x2+1)²
 f3: (x3)²
 C3: { x : x2 - x1 - x3 ≥ 0 }
 """
-function setup(::Val{:simple_network}; kwargs...)
+function setup(::Val{:simple_network}; edge_version=1, kwargs...)
     
     x = Symbolics.variables(:x, 1:3)
     
@@ -33,8 +33,10 @@ function setup(::Val{:simple_network}; kwargs...)
 
     edge_list_v1 = [(qp_id2,qp_id3)]
     edge_list_v2 = [(qp_id1,qp_id3),(qp_id2,qp_id3)]
+    edge_list_v3 = [(qp_id1,qp_id2),(qp_id2,qp_id3)]
+    edge_versions = Dict(1=>edge_list_v1, 2=>edge_list_v2, 3=>edge_list_v3)
 
-    QPN.add_edges!(qp_net, edge_list_v2)
+    QPN.add_edges!(qp_net, edge_versions[edge_version])
     QPN.assign_constraint_groups!(qp_net)
     QPN.set_options!(qp_net; kwargs...)
     

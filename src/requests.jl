@@ -12,8 +12,9 @@ Lots of inefficiencies:
 """
 function solve(qpn::QPNet, x_init, parent_level_request=Set{Linear}(), relaxable_inds=Set{Int}();
         level=1,
-        rng=MersenneTwister())
-    return solve_base!(qpn, x_init, parent_level_request, relaxable_inds; level, rng)
+        proj_vectors=Vector{Vector{Float64}}(),
+        rng=MersenneTwister(1))
+    return solve_base!(qpn, x_init, parent_level_request, relaxable_inds; level, rng, proj_vectors)
     x_in = x_init
     indent = "       "^level
     req_status = isempty(parent_level_request) ? "is empty" : "is present"

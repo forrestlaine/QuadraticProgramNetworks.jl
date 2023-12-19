@@ -60,10 +60,12 @@ Base.@kwdef mutable struct QPNetOptions
     tol::Float64=1e-4
     high_dimension::Bool=false
     high_dimension_max_iters::Int=10
+    num_projections::Int=0
     make_requests::Bool=false
-    try_hull::Bool=true
-    debug::Bool=true
-    gen_solution_map::Bool=false
+    exploration_vertices::Int=0
+    try_hull::Bool=false
+    debug::Bool=false
+    gen_solution_map::Bool=true
 end
 
 struct QPNet
@@ -98,12 +100,12 @@ function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
 end
 
 function flatten(qpn::QPNet)
-    QPNet(qpn.qps,
-          qpn.constraints,
-          Dict(1=>Set(keys(qpn.qps))),
-          qpn.options,
-          qpn.variables,
-          qpn.var_indices)
+    qpnf = deepcopy(qpn)
+    empty!(qpnf.network_edges)
+    empty!(qpnf.reachable_nodes)
+    empty!(qpnf.network_depth_map)
+    add_edges!(qpnf, [])
+    qpnf 
 end
 
 function get_flat_initialization(qpn::QPNet; x0 = zeros(length(qpn.variables)))

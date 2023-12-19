@@ -64,6 +64,7 @@ function IntersectionRoot(pus::Vector{PolyUnion}, red_lengths, central_point; sh
 end
 
 function get_next!(node::IntersectionNode, parent_poly, state)
+    sleep(0)
     if ismissing(node.resulting_poly)
         if isnothing(parent_poly)
             node.resulting_poly = deepcopy(node.contributing_poly)

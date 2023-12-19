@@ -152,7 +152,11 @@ function setup(::Val{:robust_constrained}; T=5,
     
     # Add players responsible for identifying least-violated obstacle halfspace
     # constraint (min s s.t. s ≥ (aᵢ'x - bᵢ)) 
-    # [recall obstacle avoidance ⇿ ∃ i s.t. aᵢ'x > bᵢ]
+    # [recall obstacle avoidance ⇿ ∃ i s.t. aᵢ'x > bᵢ, i.e. only one halfspace
+    # constraint needs to be satisfied to "avoid" the obstacle]
+    
+    s_players = Dict()
+
     for t = 1:T
         for i = 1:num_obj
             cost = s[i, t] # min s[t,i]
@@ -167,9 +171,9 @@ function setup(::Val{:robust_constrained}; T=5,
             end
             con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
             
-            level = 4
             vars = [s[i, t]; [h[j, i, t] for j in 1:num_obj_faces]]
-            player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], vars...)
+            player_id = QPN.add_qp!(qp_net, cost, [con_id,], vars...)
+            s_players[t,i] = player_id
         end
     end
     
@@ -189,9 +193,8 @@ function setup(::Val{:robust_constrained}; T=5,
     lb = fill(0.0, length(min_cons))
     ub = fill(Inf, length(min_cons))
     con_id = QPN.add_constraint!(qp_net, min_cons, lb, ub)
-    level = 4
     cost = -c
-    player_id = QPN.add_qp!(qp_net, level, cost, [con_id,], c)
+    c_player = QPN.add_qp!(qp_net, cost, [con_id,], c)
 
     #####################################################################
 
@@ -236,20 +239,18 @@ function setup(::Val{:robust_constrained}; T=5,
 
     v_con_id = QPN.add_constraint!(qp_net, [v-c,], [0.0,], [Inf,])
 
-    level = 3
     cost = 0.5*(v)^2
-    player_id = QPN.add_qp!(qp_net, level, cost, [dyn_con_id, init_con_id, obstacle_con_id, v_con_id], x̄, x, o, v)
+    v_player = QPN.add_qp!(qp_net, cost, [dyn_con_id, init_con_id, obstacle_con_id, v_con_id], x̄, x, o, v)
     #####################################################################
 
     # Add player responsible for modifying obstacles, initial state,
     # so as to create worst-case cost (no private vars introduced)
     
 
-    w_con_id = QPN.add_constraint!(qp_net, [0.5+c-w,], [0.0,], [Inf,])
-    
-    primary_cost = 0.5*w^2
-    level = 2
-    player_id = QPN.add_qp!(qp_net, level, primary_cost, [w_con_id,], w, u)
+    #w_con_id = QPN.add_constraint!(qp_net, [0.5+c-w,], [0.0,], [Inf,])
+    #
+    #primary_cost = 0.5*w^2
+    #w_player = QPN.add_qp!(qp_net, primary_cost, [w_con_id,], w, u)
 
     #####################################################################
 
@@ -282,8 +283,13 @@ function setup(::Val{:robust_constrained}; T=5,
 
     #primary_cost = sum(-lane_dist_incentive * x[1:2, t]'*lane_vec + 0.001*u[2,t]^2 for t = 1:T)
     primary_cost = sum((u[1,t]-15)^2+u[2,t]^2 for t = 1:T)
-    level = 1
-    player_id = QPN.add_qp!(qp_net, level, primary_cost, [con_id,])
+    u_player = QPN.add_qp!(qp_net, primary_cost, [con_id,], u)
+
+
+    #################3
+    
+    # Add edges
+    #
 
     QPN.assign_constraint_groups!(qp_net)
     QPN.set_options!(qp_net; kwargs...)

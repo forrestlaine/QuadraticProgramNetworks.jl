@@ -387,7 +387,7 @@ function Base.issubset(P1::Poly, P2::Poly; tol=1e-6)
                 model = OSQP.Model()
                 OSQP.setup!(model; 
                             q = dir*collect(A2[i,:]), 
-                            A=A1, 
+                            A=sparse(A1), 
                             l=l1, 
                             u=u1, 
                             verbose=false, 
@@ -503,9 +503,9 @@ function project(p::Poly, keep_dims; tol=1e-6)
     Pmat = sparse(I, N, N)
     Pmat = Pmat[keep_dims, :]
 
-    projected_points::Vector{Vector{Float64}} = map(point->Pmat*point, points(vr))
-    projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(ray->Pmat*ray, rays(vr))
-    projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, lines(vr))
+    projected_points::Vector{Vector{Float64}} = map(point->Pmat*point, Polyhedra.points(vr))
+    projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(ray->Pmat*ray, Polyhedra.rays(vr))
+    projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, Polyhedra.lines(vr))
 
     proj_vr = vrep(projected_points, projected_lines, projected_rays)
     projected = vrep_to_poly(proj_vr)
@@ -809,6 +809,21 @@ function Base.lastindex(pu::PolyUnion)
     lastindex(pu.polys)
 end
 
+function remove_subsets(pu::PolyUnion)
+    is_subset = zeros(Bool, length(pu))
+    Threads.@threads for i in 1:length(pu)
+        if any(i ≠ j && !is_subset[j] && pu[i] ⊆ p for (j,p) in enumerate(pu))
+            is_subset[i] = true
+        end
+    end
+    proper_sets = pu[.!is_subset]
+    sum(is_subset) > 0 && @info "Removed $(sum(is_subset)) redundant sets."
+    return PolyUnion(proper_sets)
+end
+function remove_subsets(pu::Nothing)
+    nothing
+end
+
 """
 Return true if x is an element of pu.
 """
@@ -846,6 +861,14 @@ end
 function poly_intersect(p::Union{BasicPoly, ProjectedPoly}, ip::IntersectionPoly)
     @assert embedded_dim(p) == embedded_dim(ip)
     IntersectionPoly([p; ip.polys])
+end
+
+function poly_intersect(p::IntersectionPoly...)
+    @assert allequal(embedded_dim(pp) for pp in p)
+    all_polys = mapreduce(vcat, p) do pp
+        pp.polys
+    end
+    IntersectionPoly(all_polys)
 end
 
 """
