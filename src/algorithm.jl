@@ -11,7 +11,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
     for iters in 1:qpn.options.max_iters
         proj_vals = [x'v for v in proj_vectors]
         @info "Iteration $iters at level $level. $proj_vals"
-        level == 1 && visualize(qpn, x; T=5)
         
         if level < num_levels(qpn)
             ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng, proj_vectors)
@@ -22,15 +21,16 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             S = Dict()
         end
 
-        players_at_level = qpn.network_depth_map[level] |> collect
+        players_at_level = qpn.network_depth_map[level] |> collect |> sort
+        players_at_child_level = union((qpn.network_edges[i] for i in players_at_level)...) |> collect |> sort
         processing_tasks = map(players_at_level) do id
             #Threads.@spawn process_qp(qpn, id, x, S)
             process_qp(qpn, id, x, S; exploration_vertices=qpn.options.exploration_vertices)
         end
         results = fetch.(processing_tasks)
         equilibrium = true
-        subpiece_assignments = Dict{Int, Poly}()
-        subpiece_ids = Dict{Int, Int}()
+        subpiece_assignments = Dict(i=>S[i][1] for i in players_at_child_level)
+        subpiece_ids = Dict(i=>1 for i in players_at_child_level)
         for (i,id) in enumerate(players_at_level)
             r = results[i]
             if !r.solution
@@ -60,6 +60,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 x = xnew
             catch e
                 @error "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."
+                @infiltrate
                 return (; x_fail=x)
             end
             continue

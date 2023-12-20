@@ -70,10 +70,10 @@ function solve_avi(avi::AVI, z0, w)
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
-        return (; z, status=FAILURE)
+        return (; z, status=FAILURE, info=(;path_status, info))
     end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
-    return (; z, status)
+    return (; z, status, info=(; path_status, info))
 end
 
 function find_closest_feasible!(gavi, z0, w)
@@ -105,9 +105,9 @@ function solve_gavi(gavi::GAVI, z0, w; presolve=true)
     d2 = length(gavi.l2)
     s = gavi.A*z0+gavi.B*w
     z0s = copy([z0; s])
-    (; z, status) = solve_avi(avi, z0s, w)
+    (; z, status, info) = solve_avi(avi, z0s, w)
     zg = z[1:d1+d2]
-    (; z=zg, status)
+    (; z=zg, status, info)
 end
 
 function convert(gavi::GAVI)
@@ -406,10 +406,11 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     # TODO : if I want to support successive minimization of ||ψ|| over
     # iterations, need to properly warmstart with previous solution? Might
     # require reducing dimension AFTER psi minimization
-    (; z, status) = solve_gavi(gavi, z0, w)
+    (; z, status, info) = solve_gavi(gavi, z0, w)
 
     if status != SUCCESS
-        error("AVI solve error!")
+        @infiltrate
+        error("AVI solve error. $(info)")
     end
     #    relaxable_parent_inds = setdiff(relaxable_inds, dec_inds)
     #    relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]

@@ -125,7 +125,10 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         cardinalities = map(child_inds) do j
             1:length(S[j])
         end
-        any(length.(cardinalities) .< 1) && error("Solution graphs were not properly populated.")
+        if any(length.(cardinalities) .< 1) 
+            @infiltrate
+            error("Solution graphs were not properly populated.")
+        end
         
         all_subpiece_indices = collect(Iterators.product(cardinalities...))
         @info "Creating subpiece solgraphs in the processing of node $id. Number of combinations of subpieces to investigate: $(length(all_subpiece_indices))."
@@ -176,7 +179,6 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
             end
         end
     end
-
     return (; solution=true, S=S_out)
 end 
 
@@ -214,10 +216,11 @@ function combine(regions, solutions, x; show_progress=true)
         it = 0
         combined = map(zip(solutions, complements)) do (s, rc)
             it += 1
-            PolyUnion([collect(s); rc.polys]) |> remove_subsets
+            PolyUnion([collect(s); rc.polys]) #|> remove_subsets
         end
         @info "Widths: $([length(c) for c in combined])"
         #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
-        IntersectionRoot(combined, length.(complements), x; show_progress)
+        root = IntersectionRoot(combined, length.(complements), x; show_progress)
+        root
     end
 end

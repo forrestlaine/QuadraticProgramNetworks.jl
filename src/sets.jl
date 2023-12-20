@@ -852,6 +852,22 @@ end
 """
 Intersect p with polys.
 """
+
+function poly_intersect(p::Poly, ps::Poly...)
+    if p isa IntersectionPoly
+        polys = p.polys
+    else
+        polys = [p]
+    end
+    for pp in ps
+        if pp isa IntersectionPoly
+            append!(polys, pp.polys)
+        else
+            push!(polys, p)
+        end
+    end
+    IntersectionPoly(polys)
+end
 function poly_intersect(p::Union{BasicPoly, ProjectedPoly}...)
     d = embedded_dim(first(p))
     @assert all(embedded_dim(psi) == d for psi in p)
