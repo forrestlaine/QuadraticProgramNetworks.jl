@@ -126,7 +126,6 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
             1:length(S[j])
         end
         if any(length.(cardinalities) .< 1) 
-            @infiltrate
             error("Solution graphs were not properly populated.")
         end
         
@@ -175,7 +174,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
             if gen_solution_graphs
                 S_out = process_solution_graph(qp, base_constraints, dec_inds, x, ret.λ; exploration_vertices) |> collect |> PolyUnion
                 if length(S_out) == 0
-                    @infiltrate
+                    error("This shouldn't happen. Solution graph is empty.")
                 end
             else
                 S_out = nothing
