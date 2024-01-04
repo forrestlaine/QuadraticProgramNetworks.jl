@@ -214,7 +214,7 @@ function create_minimal_adj_matrix(N, edge_list)
             for j = 1:N
                 if A[i,j] && Aⁿ[i,j]
                     A[i,j] = false
-                    @info "Deleting $i -> $j (found alternate path using $n transitions)"
+                    #@info "Deleting $i -> $j (found alternate path using $n transitions)"
                 end
             end
         end

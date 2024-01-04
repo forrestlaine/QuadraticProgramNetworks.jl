@@ -409,34 +409,16 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     (; z, status, info) = solve_gavi(gavi, z0, w)
 
     if status != SUCCESS
-        @infiltrate
         error("AVI solve error. $(info)")
     end
-    #    relaxable_parent_inds = setdiff(relaxable_inds, dec_inds)
-    #    relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
-    #    if !isempty(relaxable_parent_inds) && request_comes_from_parent
-    #        debug && @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
-    #        r_gavi = relax_gavi(gavi, relaxable_parent_inds)
-    #        r_z0 = [w[relaxable_parent_inds]; z0]
-    #        r_w = w[setdiff(1:length(w), relaxable_parent_inds)]
-    #        ret = solve_gavi(r_gavi, r_z0, r_w)
-    #        status = ret.status
-    #        if status != SUCCESS
-    #            error("AVI solve error, even after relaxing indices.")
-    #        end
-    #        l_r = length(relaxable_parent_inds)
-    #        w[relaxable_parent_inds] = ret.z[1:l_r]
-    #        z = ret.z[l_r+1:end]
-    #    else
-    #        @infiltrate
-    #        error("AVI solve error!")
-    #    end
-    #end
 
     num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)
     ξ = z[length(dec_inds)+1:length(dec_inds)+num_ξ]
     if norm(ξ) > 1e-3
-        error("Detected disagreement in the values of decision variables. It seems that two or more nodes are granted control of the same unrestricted decision variables. The handling of such conflicts is currently disabled.")
+        error("Detected disagreement in the values of decision variables. 
+              It seems that two or more nodes are granted control of the 
+              same unrestricted decision variables. The handling of such 
+              conflicts is currently disabled.")
     end
     
     @debug "Found solution, now generating solution map (level $(level))"
@@ -444,33 +426,6 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     x_opt[dec_inds] = z[1:length(dec_inds)]
     x_opt[param_inds] = w
     return x_opt
-    
-    ## TODO figure out request structure with vertex expansion (is
-    ## v-enum even required?)
-
-    #if gen_sol
-    #    Sol = Dict()
-    #    for id in player_pool
-    #        single_gavi, x_locations = finalize_gavi(x_dim, labeled_gavis[id], z, w)
-    #        sols = LocalGAVISolutions(single_gavi, z, w, level, subpiece_index, x_locations, request; max_vertices=0)
-    #    end
-
-    #    Sol = Dict(id => LocalGAVISolutions(finalize_gavi(labeled_gavis[id]), z, w, level, subpiece_index, dec_inds, param_inds, request; max_vertices=1000) for id in player_pool)
-    #else
-    #    Sol = nothing
-    #end
-    #@debug "Solution map generated."
-
-    ## TODO : should probably propagate any parent level requests if
-    ## they appear in S 
-
-    #if isnothing(S) || !make_requests || true # not dealing with requests right now
-    #    identified_request = Set{Linear}()
-    #else
-    #    S_duals = z[S_dual_inds]
-    #    identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
-    #end
-    #(; x_opt, Sol, identified_request)
 end
 
 

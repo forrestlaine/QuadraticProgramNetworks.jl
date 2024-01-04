@@ -10,11 +10,11 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
     end
     for iters in 1:qpn.options.max_iters
         proj_vals = [x'v for v in proj_vectors]
-        @info "Iteration $iters at level $level. $proj_vals"
+        @debug "Iteration $iters at level $level. $proj_vals"
         
         if level < num_levels(qpn)
             ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng, proj_vectors)
-            @info "Resuming iteration $iters at level $level"
+            @debug "Resuming iteration $iters at level $level"
             S = ret_low.Sol
             x = ret_low.x_opt
         else
@@ -48,7 +48,10 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 end
             else
                 S[id] = results[i].S |> remove_subsets
-                !isnothing(S[id]) && @info "Solution graph for node $i has $(length(S[id])) pieces."
+                if !isnothing(S[id]) && length(S[id]) == 0
+                    @infiltrate
+                end
+                !isnothing(S[id]) && @debug "Solution graph for node $i has $(length(S[id])) pieces."
             end
         end
         if !equilibrium
@@ -59,13 +62,12 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 end
                 x = xnew
             catch e
-                @error "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."
-                @infiltrate
-                return (; x_fail=x)
+                @debug "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."
+                return (; solved=false, x_fail=x, x_opt=nothing)
             end
             continue
         else
-            return (; x_opt=x, Sol=S, identified_request=Set{Linear}(), x_alts=Vector{Float64}[])
+            return (; solved=true, x_opt=x, Sol=S, identified_request=Set{Linear}(), x_alts=Vector{Float64}[])
         end
     end
     error("Can't find solution")

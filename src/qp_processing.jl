@@ -131,7 +131,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         end
         
         all_subpiece_indices = collect(Iterators.product(cardinalities...))
-        @info "Creating subpiece solgraphs in the processing of node $id. Number of combinations of subpieces to investigate: $(length(all_subpiece_indices))."
+        @debug "Creating subpiece solgraphs in the processing of node $id. Number of combinations of subpieces to investigate: $(length(all_subpiece_indices))."
         subpiece_solgraphs = map(all_subpiece_indices) do child_subpiece_indices
             let child_inds=child_inds, child_subpiece_indices=child_subpiece_indices, S=S, base_constraints=base_constraints, qp=qp, dec_inds=dec_inds, x=x, exploration_vertices=exploration_vertices
                 children_solgraph_polys = map(child_inds, child_subpiece_indices) do j,ji
@@ -146,7 +146,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
                     if gen_solution_graphs
                         solgraph_generator = process_solution_graph(qp, appended_constraints, dec_inds, x, ret.λ; exploration_vertices)
                         high_dim = length(solgraph_generator.z) + length(solgraph_generator.w)
-                        @info "There are $(length(solgraph_generator.unexplored_Ks)) nodes to expand, excluding additional vertex exploration. Projecting from $high_dim to $(length(x)) dimensions."
+                        @debug "There are $(length(solgraph_generator.unexplored_Ks)) nodes to expand, excluding additional vertex exploration. Projecting from $high_dim to $(length(x)) dimensions."
                         solgraph = (children_solgraph_polys, remove_subsets(PolyUnion(collect(solgraph_generator))))
                         solgraph
                     else
@@ -163,7 +163,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
             end
         end
         if gen_solution_graphs
-            S_out = combine((r.solgraph for r in results), x) |> collect |> PolyUnion
+            S_out = combine((r.solgraph for r in results), x; show_progress=false) |> collect |> PolyUnion
         else
             S_out = nothing
         end
@@ -174,6 +174,9 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         else
             if gen_solution_graphs
                 S_out = process_solution_graph(qp, base_constraints, dec_inds, x, ret.λ; exploration_vertices) |> collect |> PolyUnion
+                if length(S_out) == 0
+                    @infiltrate
+                end
             else
                 S_out = nothing
             end
@@ -218,7 +221,7 @@ function combine(regions, solutions, x; show_progress=true)
             it += 1
             PolyUnion([collect(s); rc.polys]) #|> remove_subsets
         end
-        @info "Widths: $([length(c) for c in combined])"
+        @debug "Widths: $([length(c) for c in combined])"
         #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
         root = IntersectionRoot(combined, length.(complements), x; show_progress)
         root

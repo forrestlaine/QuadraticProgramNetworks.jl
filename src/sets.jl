@@ -811,13 +811,16 @@ end
 
 function remove_subsets(pu::PolyUnion)
     is_subset = zeros(Bool, length(pu))
-    Threads.@threads for i in 1:length(pu)
+    #Threads.@threads for i in 1:length(pu)
+    # Multithreading in this manner can cause an over-elimination of polys,
+    # when two sets are subsets of eachother. Need to fix before re-enabling
+    for i in 1:length(pu)
         if any(i ≠ j && !is_subset[j] && pu[i] ⊆ p for (j,p) in enumerate(pu))
             is_subset[i] = true
         end
     end
     proper_sets = pu[.!is_subset]
-    sum(is_subset) > 0 && @info "Removed $(sum(is_subset)) redundant sets."
+    sum(is_subset) > 0 && @debug "Removed $(sum(is_subset)) redundant sets."
     return PolyUnion(proper_sets)
 end
 function remove_subsets(pu::Nothing)
