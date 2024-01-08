@@ -62,6 +62,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 end
                 x = xnew
             catch e
+                @infiltrate
                 @debug "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."
                 return (; solved=false, x_fail=x, x_opt=nothing)
             end

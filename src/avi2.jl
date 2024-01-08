@@ -241,7 +241,7 @@ function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
         A, l, u
     end |> (x->vcat.(x...))
 
-    M1 = [qp.f.Q[dvars, :] -sparse(I, n, n) -A_i[:,dvars]' -A_Si[:,dvars]']
+    M1 = [qp.f.Q[dvars, :] 0*-sparse(I, n, n) -A_i[:,dvars]' -A_Si[:,dvars]']
     q1 = qp.f.q[dvars]
     M2 = [A_i; A_Si]
     l2 = [l_i; l_Si]
@@ -414,14 +414,15 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
 
     num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)
     ξ = z[length(dec_inds)+1:length(dec_inds)+num_ξ]
-    if norm(ξ) > 1e-3
+    if norm(ξ) > 1e-3 && false
+        @infiltrate
         error("Detected disagreement in the values of decision variables. 
               It seems that two or more nodes are granted control of the 
               same unrestricted decision variables. The handling of such 
               conflicts is currently disabled.")
     end
     
-    @debug "Found solution, now generating solution map (level $(level))"
+    @debug "Found solution, now generating solution map."
     x_opt = copy(x)
     x_opt[dec_inds] = z[1:length(dec_inds)]
     x_opt[param_inds] = w

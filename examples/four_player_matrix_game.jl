@@ -3,7 +3,7 @@ Four players. Each player:
 
 min { xi ∈ ℝ² } : ∑ⱼ∑ₖ₌ⱼ₊₁ xj' Aᵢⱼₖ xk
 """
-function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, kwargs...)
+function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_constellations=false, kwargs...)
 
     # Seed 2 gives nice difference between Nash (edge_list=[]) and parallel
     # bilevel (edge_list=[(1,2), (3,4)]) settings.
@@ -27,11 +27,41 @@ function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, kwargs...)
         end
     end
 
+    locations = [[-0.5,-0.5], [-0.5, 0.5], [0.5, 0.5], [0.5,-0.5]]
+    #locations = [randn(rng, 2) for i in 1:4]
+    constellations = Dict(i=>Dict(j=>locations[mod1(j+i-1,4)] for j in 1:4) for i in 1:4)
+    constellations = Dict(i=>Dict(j=>0.5*randn(rng, 2) for j in 1:4) for i in 1:4)
+
+    for i = 1:4
+        constellations[i][i] = zeros(2)
+    end
+
+    if show_constellations
+        f = Figure()
+        ax1 = Axis(f[1,1])
+        ax2 = Axis(f[1,2])
+        ax3 = Axis(f[2,1])
+        ax4 = Axis(f[2,2])
+        ax = [ax1, ax2, ax3, ax4]
+        for i = 1:4
+            scatter!(ax[i], constellations[i][1]..., color=:blue)
+            scatter!(ax[i], constellations[i][2]..., color=:red)
+            scatter!(ax[i], constellations[i][3]..., color=:green)
+            scatter!(ax[i], constellations[i][4]..., color=:yellow)
+            xlims!(ax[i], -1, 1)
+            ylims!(ax[i], -1, 1)
+        end
+        display(f)
+    end
+
     for i = 1:4
 
-        cons = [x[i]; sum(x[i])]
-        lb = [0.0, 0.0, 1.0]
-        ub = [Inf, Inf, 1.0]
+        #cons = [x[i]; sum(x[i])]
+        #lb = [0.0, 0.0, -Inf]
+        #ub = [Inf, Inf, 1.0]
+        cons = x[i]
+        lb = [-1.0, -1.0]
+        ub = [1.0, 1.0]
         con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
 
         ent = [0.5, 0.5]
@@ -42,17 +72,35 @@ function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, kwargs...)
         #    end
         #end
         cost = 0
-        targs = map(1:4) do j
-            a = rand(rng, 2)
-            a ./ sum(a)
-            a
-        end
+        #targs = map(1:4) do j
+        #    a = 0.5*randn(rng, 2)
+        #    #a ./ sum(a)
+        #    a
+        #end
 
+        #for j = 1:4
+        #    for k = 1:4
+        #        mult = (j==k) ? 1.0 : 0.25
+        #        cost += mult*(x[j]-targs[j])'*(x[k]-targs[k])
+        #    end
+        #end
+
+        cost = 0
         for j = 1:4
-            for k = j:4
-                cost += (x[j]-targs[j])'*(x[k]-targs[k])
+            if j == i
+                cost += (x[i])'*(x[i])
+            else
+                d = (x[j] - x[i]) - (constellations[i][j])
+                cost += d'*d
             end
         end
+
+        #all_x = vcat(x[1], x[2], x[3], x[4])
+        #Q = randn(rng, 8, 8)
+        #Q = Q'*Q
+        #q = randn(rng, 8)
+        #cost = all_x'*Q*all_x + all_x'*q
+
         dvars = x[i]
 
         QPN.add_qp!(qp_net, cost, [con_id], dvars)
@@ -68,14 +116,37 @@ end
 
 function search_for_game(seed_range)
     # 4080 results in 8 for all_edges=[(1,2),(2,3),(3,4)]
-    all_edges = [(1,2),(2,3),(3,4)]
+    all_edges = [(1,2),(1,3),(1,4),(2,3),(2,4),(3,4)]
     edge_list_ps = powerset(all_edges) |> collect
 
+    el_dict = Dict()
+    for (e,edge_list) in enumerate(edge_list_ps) 
+        qpn = setup(:four_player_matrix_game; edge_list)
+        if qpn.network_edges in keys(el_dict)
+            push!(el_dict[qpn.network_edges], e)
+        else
+            el_dict[qpn.network_edges] = [e]
+        end
+    end
+    unique_edges = []
+    for e in 1:length(edge_list_ps)
+        unique=true
+        for (k,v) in el_dict
+            if e in v && length(v) > 1 && e != minimum(v)
+                unique=false
+            end
+        end
+        if unique
+            push!(unique_edges, e)
+        end
+    end
+    edge_list_ps_unique = edge_list_ps[unique_edges]
+
     num_unique_equilibria = map(seed_range) do seed
-        x_opts = map(edge_list_ps) do edge_list
+        x_opts = map(edge_list_ps_unique) do edge_list
             qpn = setup(:four_player_matrix_game; edge_list, seed)
             try
-                ret = solve(qpn, fill(0.5, 8))
+                ret = solve(qpn, fill(0.0, 8))
                 ret.x_opt
             catch e
                 nothing
@@ -87,13 +158,14 @@ function search_for_game(seed_range)
             0
         else
             equilibria = Dict(i=>[i] for i in 1:length(x_opts))
-            for i in 1:length(edge_list_ps)
-                qpn = setup(:four_player_matrix_game; edge_list=edge_list_ps[i], seed)
+            for i in 1:length(edge_list_ps_unique)
+                qpn = setup(:four_player_matrix_game; edge_list=edge_list_ps_unique[i], seed)
                 for j in 1:length(x_opts)
                     j == i && continue
                     try 
                         ret = solve(qpn, x_opts[j])
                         if ret.x_opt ≈ x_opts[j]
+                            @debug "$j is an equilibrium for problem $i"
                             push!(equilibria[i], j)
                         end
                     catch e
@@ -110,4 +182,110 @@ function search_for_game(seed_range)
     end
     ii = argmax(num_unique_equilibria)
     @info "The best seed was $(seed_range[ii]) with $(num_unique_equilibria[ii]) unique equilibria"
+end
+
+function analyze_equilibria(seed_range)
+    all_edges = [(4,2),(4,3),(4,1),(2,3),(2,1),(1,3)]
+    #all_edges = [(4,2),(4,3),(4,1),(2,3),(2,1),(3,1)]
+    edge_list_ps = powerset(all_edges) |> collect
+
+    el_dict = Dict()
+    for (e,edge_list) in enumerate(edge_list_ps) 
+        qpn = setup(:four_player_matrix_game; edge_list)
+        if qpn.network_edges in keys(el_dict)
+            push!(el_dict[qpn.network_edges], e)
+        else
+            el_dict[qpn.network_edges] = [e]
+        end
+    end
+    unique_edges = []
+    for e in 1:length(edge_list_ps)
+        unique=true
+        for (k,v) in el_dict
+            if e in v && length(v) > 1 && e != minimum(v)
+                unique=false
+            end
+        end
+        if unique
+            push!(unique_edges, e)
+        end
+    end
+    edge_list_ps_unique = edge_list_ps[unique_edges]
+    @infiltrate
+
+    results = Dict(el=>zeros(4) for el in edge_list_ps_unique)
+
+    num_success = 0
+    @showprogress for seed in seed_range
+       
+        try
+            x_opts = map(edge_list_ps_unique) do edge_list
+                qpn = setup(:four_player_matrix_game; edge_list, seed)
+                try
+                    ret = solve(qpn, fill(0.0, 8))
+                    ret.x_opt
+                catch e
+                    nothing
+                end
+            end
+
+            #f = Figure()
+            #ax = Axis(f[1, 1])
+
+            #x_show = x_opts[1:1]
+            #scatter!(ax, [x[1] for x in x_show], [x[2] for x in x_show], color=:blue)
+            #scatter!(ax, [x[3] for x in x_show], [x[4] for x in x_show], color=:red)
+            #scatter!(ax, [x[5] for x in x_show], [x[6] for x in x_show], color=:green)
+            #scatter!(ax, [x[7] for x in x_show], [x[8] for x in x_show], color=:yellow)
+            #xlims!(ax, -1, 1)
+            #ylims!(ax, -1, 1)
+            #window = display(GLMakie.Screen(), f)
+            #display(window)
+
+            qpn = setup(:four_player_matrix_game; seed)
+
+            for (x,edge_list) in zip(x_opts, edge_list_ps_unique)
+                costs = map(1:4) do i
+                    qpn.qps[i].f(x)
+                end
+                results[edge_list] += costs
+            end
+            num_success += 1
+        catch err
+            if err isa InterruptException
+                return
+            end
+            @info "Bad seed: $seed"
+            continue
+        end
+    end
+
+    min_costs = [minimum(c[i] for c in values(results)) for i in 1:4]
+    min_costs *= 0.0
+
+    costs = map(1:4) do i
+        map(edge_list_ps_unique) do el
+            results[el][i]
+        end
+    end
+    @info "Percent successful seeds: $(100*num_success/length(seed_range))"
+    costs ./= num_success
+    for i in 1:4
+        I = sortperm(costs[i])
+        display([edge_list_ps_unique[I] costs[i][I]])
+    end
+
+    output = ""
+    for (edge_list, costs) in results
+        output *= "\\{"
+        for e in edge_list
+            output *= "($(e[1]), $(e[2])), "
+        end
+        if length(edge_list) > 0
+            output = output[1:end-2]
+        end
+        cs = [round(costs[i] - min_costs[i]; digits=4) for i in 1:4]
+        output *= "\\} & $(cs[1]) & $(cs[2]) & $(cs[3]) & $(cs[4]) \\\\ \n"
+    end
+    print(output)
 end
