@@ -440,7 +440,12 @@ function get_verts(p; tol=1e-6)
     hr = get_Polyhedron_hrep(p; tol)
     vr = Polyhedra.doubledescription(hr)
     if length(vr.points.points) == 0
-        error("There should be at least one vertex in a non-empty pointed cone")
+        (; empty, example) = exemplar(p)
+         if intrinsic_dim(p) == 0 && !empty
+            return (; V = [example], R=Vector{Float64}[], L=Vector{Float64}[])
+         else
+            error("There should be at least one vertex in a non-empty pointed cone")
+        end
     end
     (; V = vr.points.points, R = vr.rays.rays, L = vr.rays.lines.lines)
 end
@@ -538,14 +543,27 @@ function poly_slice(poly::IntersectionPoly, x::Vector{Union{Float64, Missing}})
 end
 
 function exemplar(poly::Poly; tol=1e-4, debug=false)
+
+
+
+
     m = OSQP.Model()
     n = length(poly)
     n == 0 && return (; empty=false, example=nothing)
     (; A,l,u,rl,ru) = vectorize(poly)
     d = size(A,2)
+    (; open_low, open_hi) = open_bounds(l,u,rl,ru)
+
+    if isapprox(l, u; atol=tol, rtol=tol) && sum(open_low) == 0 && sum(open_hi) == 0
+        x = A\l 
+        if isapprox(A*x, l; atol=tol, rtol=tol)
+            return (; empty=false, example=x)
+        else
+            return (; empty=true, example=nothing)
+        end
+    end
 
     AA = [[A; A] zeros(2n); zeros(1,d+1)]
-    (; open_low, open_hi) = open_bounds(l,u,rl,ru)
     l = [l; fill(-Inf, n); 0]
     u = [fill(Inf, n); u; 1]
     AA[1:n,end] = -1.0 * open_low

@@ -65,7 +65,8 @@ function solve_avi(avi::AVI, z0, w)
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
                                                    silent=true, 
                                                    convergence_tolerance=1e-8, 
-                                                   cumulative_iteration_limit=100000,
+                                                   cumulative_iteration_limit=200000,
+                                                   major_iteration_limit=1000,
                                                    restart_limits=5,
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
@@ -409,6 +410,7 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     (; z, status, info) = solve_gavi(gavi, z0, w)
 
     if status != SUCCESS
+        @infiltrate
         error("AVI solve error. $(info)")
     end
 
