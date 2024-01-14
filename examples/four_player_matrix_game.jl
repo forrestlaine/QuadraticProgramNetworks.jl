@@ -406,28 +406,108 @@ function generate_graph_images()
     edge_list_ps_unique = compute_unique_edge_lists()
 
     for (idx,edge_list) in enumerate(edge_list_ps_unique)
-        g = SimpleDiGraph(UInt8(4))
-        for e in edge_list
-            add_edge!(g, e[1], e[2])
+        qpn = setup(:four_player_matrix_game; edge_list)
+       
+        locs = Dict()
+        D = length(qpn.network_depth_map)
+        spacing = 1.0
+        pos = []
+        preference = nothing
+        v1 = qpn.network_depth_map[1]
+        weird = false
+        weird_node = 0
+        if D == 3
+            for v1i in v1
+                for ci in qpn.network_edges[v1i]
+                    if ci ∈ qpn.network_depth_map[3]
+                        weird_node = v1i
+                        weird = true
+                    end
+                end
+            end
         end
+
+        for k in 1:D
+            v = qpn.network_depth_map[k]
+            n = length(v)
+            if weird
+                shift = 0
+            else
+                shift = -spacing * (n-1)/2.0
+            end
+            vs = sort(collect(v))
+            if !isnothing(preference) && preference ∈ vs
+                ind = findfirst(vs .== preference)
+                vs = [preference; vs[1:ind-1]; vs[ind+1:end]]
+            end
+            if k == 1 && weird
+                if vs[1] == weird_node
+                    vs = [vs[2:end]; vs[1]]
+                end
+            end
+
+            for (i,vi) in enumerate(vs)
+                locs[vi] = [shift + (i-1)*spacing, -(k-1)]
+                if D > 2
+                    locs[vi] = [-locs[vi][2], locs[vi][1]]
+                end
+            end
+            if length(qpn.network_edges[vs[1]]) > 0
+                preference = first(qpn.network_edges[vs[1]])
+            else
+                preference = nothing
+            end
+        end
+        cmd = "\\expandafter\\newcommand\\csname graph$idx\\endcsname{%\n\\begin{tikzpicture}[scale=0.5,baseline=(current bounding box.center)]\n\\node[circle,draw,fill=yellow!70] (1) at ($(locs[1][1]),$(locs[1][2])) {};\n"
+        for i in 2:4
+            cmd *= "\\node[circle, draw] ($i) at ($(locs[i][1]),$(locs[i][2])) {};\n"
+        end
+        cmd *= "\\graph {"
+        for e in edge_list
+            cmd *= "($(e[1])) -> ($(e[2])); "
+        end
+        cmd *= "};\n\\end{tikzpicture}\n}\n"
+        print(cmd)
+
+
+        #\newcommand{\graph_22}{%
+        #    \begin{tikzpicture}[scale=0.65]
+        #        \node[circle, draw, fill=yellow!70] (1) at (0, -1) {};
+        #        \node[circle, draw] (2) at (0,-2) {};
+        #        \node[circle, draw] (3) at (0,-3) {};
+        #        \node[circle, draw] (4) at (0,-4) {};
+        #        \graph { (1) -> (2) -> (3) -> (4)};
+        #    \end{tikzpicture}
+        #}
+        
+
+        #for e in edge_list
+        #    add_edge!(g, e[1], e[2])
+        #end
         #t = TikzGraphs.plot(g, ["α", "β", "γ", "α"], node_style="draw, rounded corners, fill=blue!10", node_styles=Dict(1=>"fill=yellow!10"))
+        
 
         #t = TikzGraphs.plot(g, ["", "", "", ""], graph_options="nodes={draw,circle}", edge_style="line width=1.5pt", node_style="draw", node_styles=Dict(1=>"fill=yellow!20"))
+        #t = TikzGraphs.plot(g, ["", "", "", ""], graph_options="nodes={draw,circle}, grow down, branch right", node_style="draw", node_styles=Dict(1=>"fill=yellow!70"))
+
+        #ind = findfirst("layered layout,", t.data)
+        #t.data = t.data[1:ind[1]-1] * t.data[ind[end]+1:end]
         
-        qpn = setup(:four_player_matrix_game; edge_list)
-        same_layer_string = ""
-        for (k,v) in qpn.network_depth_map
-            same_layer_string *= " { [same layer] "
-            for vi in v
-                same_layer_string *= "$vi, "
-            end
-            same_layer_string = same_layer_string[1:end-2]
-            same_layer_string *= "};\n"
-        end
-        t = TikzGraphs.plot(g, ["", "", "", ""], graph_options="nodes={draw,circle}", node_style="draw", node_styles=Dict(1=>"fill=yellow!70"))
-        ind = findfirst("]", t.data)[1]
-        data = t.data[1:ind] * same_layer_string * t.data[ind+1:end]
-        t.data = data
-        TikzPictures.save(PDF("graph_$idx"), t)
+        #same_layer_string = "\n"
+        #for (k,v) in qpn.network_depth_map
+        #    length(v) < 2 && continue
+        #    #k > 1 && continue
+        #    same_layer_string *= "{ [same layer] "
+        #    for vi in v
+        #        same_layer_string *= "$vi, "
+        #    end
+        #    same_layer_string = same_layer_string[1:end-2]
+        #    same_layer_string *= "};\n"
+        #end
+        #ind = findfirst(";", t.data)[1]
+        #data = t.data[1:ind] * same_layer_string * t.data[ind+1:end]
+        #t.data = data
+        #print(t.data)
+        #TikzPictures.save(PDF("graph_$idx"), t)
     end
 end
