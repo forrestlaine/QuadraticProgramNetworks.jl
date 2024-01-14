@@ -27,30 +27,24 @@ function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_const
         end
     end
 
-    #locations = [[-0.5,-0.5], [-0.5, 0.5], [0.5, 0.5], [0.5,-0.5]]
-    #locations = [randn(rng, 2) for i in 1:4]
-    #constellations = Dict(i=>Dict(j=>locations[mod1(j+i-1,4)] for j in 1:4) for i in 1:4)
     constellations = Dict(i=>Dict(j=>randn(rng, 2) for j in 1:4) for i in 1:4)
-
-    #for i = 1:4
-    #    constellations[i][i] = zeros(2)
-    #end
 
     if show_constellations
         f = Figure()
         ax1 = Axis(f[1,1])
         ax2 = Axis(f[1,2])
-        ax3 = Axis(f[2,1])
-        ax4 = Axis(f[2,2])
+        ax3 = Axis(f[1,3])
+        ax4 = Axis(f[1,4])
         ax = [ax1, ax2, ax3, ax4]
+        colors = [:blue, :red, :green, :yellow]
         for i = 1:4
-            scatter!(ax[i], constellations[i][1]..., color=:blue)
-            scatter!(ax[i], constellations[i][2]..., color=:red)
-            scatter!(ax[i], constellations[i][3]..., color=:green)
-            scatter!(ax[i], constellations[i][4]..., color=:yellow)
-            xlims!(ax[i], -1, 1)
-            ylims!(ax[i], -1, 1)
+            scatter!(ax[i], constellations[i][1]..., color=colors[i], marker='1')
+            scatter!(ax[i], (constellations[i][2] .+ constellations[i][1])..., color=colors[i], marker='2')
+            scatter!(ax[i], (constellations[i][3] .+ constellations[i][1])..., color=colors[i], marker='3')
+            scatter!(ax[i], (constellations[i][4] .+ constellations[i][1])..., color=colors[i], marker='4')
         end
+        xlims!(ax[i], -5, 5)
+        ylims!(ax[i], -5, 5)
         display(f)
     end
 

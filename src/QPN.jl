@@ -6,9 +6,6 @@ using DataStructures
 using IterTools
 using LinearAlgebra
 using OSQP
-using Graphs
-using TikzGraphs
-using TikzPictures
 using PATHSolver
 using Polyhedra
 using Printf
