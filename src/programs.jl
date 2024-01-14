@@ -16,14 +16,15 @@ end
 struct Quadratic <: Function
     Q::SparseMatrixCSC{Float64, Int32}
     q::Vector{Float64}
+    k::Float64
 end
 
 function (f::Quadratic)(x::Vector{Float64})
-    0.5*x'*(f.Q*x)+ x'*f.q
+    0.5*x'*(f.Q*x)+ x'*f.q + f.k
 end
 
 function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
-    Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs)) 
+    Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs), sum(f.k for f in fs)) 
 end
 
 struct QP
@@ -164,8 +165,9 @@ function add_qp!(qp_net, cost, con_inds, private_vars...; tol=1e-8)
         error("Detected non-quadratic cost!")
     end
     q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
+    k = map(x->Float64(x.val), Symbolics.substitute(cost, Dict(v => 0.0 for v in qp_net.variables)))
     droptol!(Q, tol)
-    f = Quadratic(Q, q)
+    f = Quadratic(Q, q, k)
     var_inds = mapreduce(vcat, private_vars; init = Int[]) do var
         inds = Vector{Int}()
         foreach(vi->push!(inds, qp_net.var_indices[vi]), var)

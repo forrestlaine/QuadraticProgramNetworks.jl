@@ -206,6 +206,10 @@ function Base.show(io::IO, mime::MIME"text/plain", f::Quadratic)
 
         str *= "%5.2f|"
         push!(args, f.q[i])
+        if i == half
+            str *= " + %5.2f"
+            push!(args, f.k)
+        end
         str *= "\n"
         format = Printf.Format(str)
         Printf.format(io, format, args...)

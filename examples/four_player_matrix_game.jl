@@ -262,7 +262,7 @@ function analyze_equilibria(seed_range)
 
                 for i in 1:1
                     I = sortperm(avg_costs[i])
-                    display([edge_list_ps_unique[I] avg_costs[i][I] 1.96*sqrt.(m2_costs[i][I])./num_success])
+                    display([I edge_list_ps_unique[I] avg_costs[i][I] 1.96*sqrt.(m2_costs[i][I])./num_success])
                 end
             end
             if mod(num_success, 1000) == 0
@@ -413,7 +413,21 @@ function generate_graph_images()
         #t = TikzGraphs.plot(g, ["α", "β", "γ", "α"], node_style="draw, rounded corners, fill=blue!10", node_styles=Dict(1=>"fill=yellow!10"))
 
         #t = TikzGraphs.plot(g, ["", "", "", ""], graph_options="nodes={draw,circle}", edge_style="line width=1.5pt", node_style="draw", node_styles=Dict(1=>"fill=yellow!20"))
-        t = TikzGraphs.plot(g, ["", "", "", ""], graph_options="nodes={draw,circle}", node_style="draw", node_styles=Dict(1=>"fill=yellow!50"))
+        
+        qpn = setup(:four_player_matrix_game; edge_list)
+        same_layer_string = ""
+        for (k,v) in qpn.network_depth_map
+            same_layer_string *= " { [same layer] "
+            for vi in v
+                same_layer_string *= "$vi, "
+            end
+            same_layer_string = same_layer_string[1:end-2]
+            same_layer_string *= "};\n"
+        end
+        t = TikzGraphs.plot(g, ["", "", "", ""], graph_options="nodes={draw,circle}", node_style="draw", node_styles=Dict(1=>"fill=yellow!70"))
+        ind = findfirst("]", t.data)[1]
+        data = t.data[1:ind] * same_layer_string * t.data[ind+1:end]
+        t.data = data
         TikzPictures.save(PDF("graph_$idx"), t)
     end
 end
