@@ -3,7 +3,7 @@ Four players. Each player:
 
 min { xi ∈ ℝ² } : ∑ⱼ∑ₖ₌ⱼ₊₁ xj' Aᵢⱼₖ xk
 """
-function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_constellations=false, kwargs...)
+function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_constellations=false, x_overlay=nothing, kwargs...)
 
     # Seed 2 gives nice difference between Nash (edge_list=[]) and parallel
     # bilevel (edge_list=[(1,2), (3,4)]) settings.
@@ -28,23 +28,90 @@ function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_const
     end
 
     constellations = Dict(i=>Dict(j=>randn(rng, 2) for j in 1:4) for i in 1:4)
+    #@infiltrate all(all(norm(constellations[i][j]) ≥ 0.9 for j in setdiff(1:4, i)) for i in 1:4)
 
     if show_constellations
         f = Figure()
-        ax1 = Axis(f[1,1])
-        ax2 = Axis(f[1,2])
-        ax3 = Axis(f[1,3])
-        ax4 = Axis(f[1,4])
-        ax = [ax1, ax2, ax3, ax4]
-        colors = [:blue, :red, :green, :yellow]
-        for i = 1:4
-            scatter!(ax[i], constellations[i][1]..., color=colors[i], marker='1')
-            scatter!(ax[i], (constellations[i][2] .+ constellations[i][1])..., color=colors[i], marker='2')
-            scatter!(ax[i], (constellations[i][3] .+ constellations[i][1])..., color=colors[i], marker='3')
-            scatter!(ax[i], (constellations[i][4] .+ constellations[i][1])..., color=colors[i], marker='4')
+        ax1 = Axis(f[1,1], aspect = 1, xgridvisible=false, ygridvisible=false)
+        #ax2 = Axis(f[1,3])
+        xlims!(ax1, -2.1, 2.1)
+        ylims!(ax1, -1.1, 3.1)
+        #xlims!(ax2, -5, 5)
+        #ylims!(ax2, -5, 5)
+        colors = [:blue, :red, :green, :orange]
+        markers = [:utriangle, :rtriangle, :dtriangle, :ltriangle]
+        if !isnothing(x_overlay)
+            new_colors = [RGBf(rand(3)...) for _ in 1:length(x_overlay)]
         end
-        xlims!(ax[i], -5, 5)
-        ylims!(ax[i], -5, 5)
+        for i = 1:4
+            scatter!(ax1, constellations[i][i]..., color=colors[i], marker=markers[i], markersize=15)
+            for j in setdiff(1:4, i)
+                scatter!(ax1, (constellations[i][j] .+ constellations[i][i])..., color=colors[i], marker=markers[j], markersize=15)
+                start = [constellations[i][i]...]
+                stop = start .+ [constellations[i][j]...]
+                len = norm(stop-start)
+                frac = 0.2 / len
+                lines!(ax1, 
+                       [(1-frac)*start[1] + frac*stop[1], frac*start[1]+(1-frac)*stop[1]],
+                       [(1-frac)*start[2] + frac*stop[2], frac*start[2]+(1-frac)*stop[2]],
+                       color=colors[i], linewidth=1)
+            end
+
+            if !isnothing(x_overlay)
+                for (k,(edge_list,x)) in enumerate(x_overlay)
+                    scatter!(ax1, x[1], x[2],color=new_colors[k],  marker=markers[1], markersize=15)
+                    scatter!(ax1, x[3], x[4],color=new_colors[k],  marker=markers[2], markersize=15)
+                    scatter!(ax1, x[5], x[6],color=new_colors[k],  marker=markers[3], markersize=15)
+                    scatter!(ax1, x[7], x[8],color=new_colors[k],  marker=markers[4], markersize=15)
+                end
+            end
+        end
+
+
+        elem_1 = MarkerElement(marker = markers[1], markersize = 15, color=:black)
+        elem_2 = MarkerElement(marker = markers[2], markersize = 15, color=:black)
+        elem_3 = MarkerElement(marker = markers[3], markersize = 15, color=:black)
+        elem_4 = MarkerElement(marker = markers[4], markersize = 15, color=:black)
+        elem_5 = LineElement(color = colors[1])
+        elem_6 = LineElement(color = colors[2])
+        elem_7 = LineElement(color = colors[3])
+        elem_8 = LineElement(color = colors[4])
+        
+        Legend(f[1, 2],
+            [
+             elem_5, elem_6, elem_7, elem_8,
+             elem_1, elem_2, elem_3, elem_4,
+            ],
+            [
+            L"Target constellation for node $1$",
+            L"Target constellation for node $2$",
+            L"Target constellation for node $3$",
+            L"Target constellation for node $4$",
+            L"Decision variables indexed by $J^1$",
+            L"Decision variables indexed by $J^2$",
+            L"Decision variables indexed by $J^3$",
+            L"Decision variables indexed by $J^4$",
+           ],
+            #patchsize = (35, 35), 
+            rowgap = 10)
+
+        if !isnothing(x_overlay)
+            elems_eq = [MarkerElement(marker=:diamond, markersize=15, color=new_colors[i]) for i in 1:length(x_overlay)]
+            labels_eq = []
+            for (e, (edge_list, x)) in enumerate(x_overlay)
+                if isempty(edge_list)
+                    push!(labels_eq, "[]")
+                else
+                    push!(labels_eq, string(edge_list))
+                end
+            end
+            Legend(f[1,3],
+                   elems_eq,
+                   labels_eq,
+                   patchsize = (35,35), rowgap = 10)
+        end
+
+        save("constellations.png", f, px_per_unit = 100)
         display(f)
     end
 
@@ -178,6 +245,26 @@ function search_for_game(seed_range)
     ii = argmax(num_unique_equilibria)
     @info "The best seed was $(seed_range[ii]) with $(num_unique_equilibria[ii]) unique equilibria"
 end
+
+function vis_equilibria(; seed=495)
+    edge_list_ps_unique = compute_unique_edge_lists()
+    x_opts = map(edge_list_ps_unique) do edge_list
+        qpn = setup(:four_player_matrix_game; edge_list, seed)
+        try
+            ret = solve(qpn, fill(0.0, 8))
+            ret.x_opt
+        catch e
+            if e isa InterruptException
+                return
+            end
+            nothing
+        end
+    end
+    x_opt_inds = [22, 23, 29, 40, 1]
+    qpn = setup(:four_player_matrix_game; seed, show_constellations=true)
+    #qpn = setup(:four_player_matrix_game; seed, show_constellations=true, x_overlay=zip(edge_list_ps_unique[x_opt_inds], x_opts[x_opt_inds]))
+end
+
 
 function analyze_equilibria(seed_range)
     edge_list_ps_unique = compute_unique_edge_lists()
@@ -313,7 +400,7 @@ function graph_is_redundant(edge_list, existing_edge_lists)
 end
 
 function compute_unique_edge_lists()
-    return [ [],
+    return Vector{Tuple{Int64,Int64}}[ [],
         [(1, 2)],
         [(2, 3)],
         [(2, 1)],

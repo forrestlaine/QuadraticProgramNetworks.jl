@@ -7,13 +7,15 @@ using IterTools
 using LinearAlgebra
 using OSQP
 using PATHSolver
+using LaTeXStrings
 using Polyhedra
 using Printf
 using ProgressMeter
 using Random
 using SparseArrays
 using Symbolics
-using GLMakie
+#using GLMakie
+using CairoMakie
 
 using Infiltrator
 
