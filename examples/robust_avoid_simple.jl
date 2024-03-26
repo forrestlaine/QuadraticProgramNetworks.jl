@@ -1,3 +1,7 @@
+function simple_dyn(x, u)
+    x + [u; u]
+end
+
 function setup(::Val{:robust_avoid_simple}; T=1,
                  num_obj=1,
                  num_obj_faces=4,
@@ -19,8 +23,8 @@ function setup(::Val{:robust_avoid_simple}; T=1,
          0 1 0 0;
          0 0 0 0;
          0 0 0 0]
-    R = [0.1 0;
-         0 0.1]
+    R = [0. 0;
+         0 0.]
     q = [0.0, 0, 0, 0]
 
     Aₑ = [1.0 0;
@@ -64,7 +68,7 @@ function setup(::Val{:robust_avoid_simple}; T=1,
 
     for t = 1:T
         cost = ϵ[t]
-        cons = [Aₑ*(s[:,t]+x1[1:2,t]) + ones(4)*ϵ[t]; Aₒ*(s[:,t]+x2[1:2,t]) + ones(3)*ϵ[t]]
+        cons = [Aₑ*(s[:,t]-x1[1:2,t]) + ones(4)*ϵ[t]; Aₒ*(s[:,t]-x2[1:2,t]) + ones(3)*ϵ[t]]
         lb = fill(0.0, length(cons))
         ub = fill(Inf, length(cons))
         con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
@@ -77,9 +81,9 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     control_cons = []
     for t = 1:T
         if t==1
-            append!(dynamic_cons, x2[:, t] - dyn(x̄2, u2[:, t]))
+            append!(dynamic_cons, x2[:, t] - simple_dyn(x̄2, u2[:, t]))
         else
-            append!(dynamic_cons, x2[:, t] - dyn(x2[:, t-1], u2[:, t]))
+            append!(dynamic_cons, x2[:, t] - simple_dyn(x2[:, t-1], u2[:, t]))
         end
         append!(control_cons, u2[:,t])
     end
@@ -96,9 +100,9 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     control_cons = []
     for t = 1:T
         if t==1
-            append!(dynamic_cons, x1[:, t] - dyn(x̄1, u1[:, t]))
+            append!(dynamic_cons, x1[:, t] - simple_dyn(x̄1, u1[:, t]))
         else
-            append!(dynamic_cons, x1[:, t] - dyn(x1[:, t-1], u1[:, t]))
+            append!(dynamic_cons, x1[:, t] - simple_dyn(x1[:, t-1], u1[:, t]))
         end
         append!(control_cons, u1[:,t])
     end
