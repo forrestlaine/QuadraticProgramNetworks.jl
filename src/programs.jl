@@ -16,14 +16,15 @@ end
 struct Quadratic <: Function
     Q::SparseMatrixCSC{Float64, Int32}
     q::Vector{Float64}
+    k::Float64
 end
 
 function (f::Quadratic)(x::Vector{Float64})
-    0.5*x'*(f.Q*x)+ x'*f.q
+    0.5*x'*(f.Q*x)+ x'*f.q + f.k
 end
 
 function Base.sum(fs::Union{Vector{Quadratic}, NTuple{N,Quadratic}}) where N
-    Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs)) 
+    Quadratic(sum(f.Q for f in fs), sum(f.q for f in fs), sum(f.k for f in fs)) 
 end
 
 struct QP
@@ -60,15 +61,20 @@ Base.@kwdef mutable struct QPNetOptions
     tol::Float64=1e-4
     high_dimension::Bool=false
     high_dimension_max_iters::Int=10
-    make_requests::Bool=true
+    num_projections::Int=0
+    make_requests::Bool=false
+    exploration_vertices::Int=0
+    try_hull::Bool=false
     debug::Bool=false
-    gen_solution_map::Bool=false
+    gen_solution_map::Bool=true
 end
 
 struct QPNet
     qps::Dict{Int, QP}
     constraints::Dict{Int, Constraint}
-    network::Dict{Int, Set{Int}}
+    network_edges::Dict{Int, Set{Int}}
+    reachable_nodes::Dict{Int, Set{Int}}
+    network_depth_map::Dict{Int, Set{Int}}
     options::QPNetOptions
     variables::Vector{Num}
     var_indices::Dict{Num, Int}
@@ -87,18 +93,20 @@ function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
     end
     qps = Dict{Int, QP}()
     constraints = Dict{Int, Constraint}()
-    network =  Dict{Int, Set{Int}}()
+    network_edges =  Dict{Int, Set{Int}}()
+    reachable_nodes =  Dict{Int, Set{Int}}()
+    network_depth_map =  Dict{Int, Set{Int}}()
     options = QPNetOptions()
-    QPNet(qps, constraints, network, options, all_vars, var_inds)    
+    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds)    
 end
 
 function flatten(qpn::QPNet)
-    QPNet(qpn.qps,
-          qpn.constraints,
-          Dict(1=>Set(keys(qpn.qps))),
-          qpn.options,
-          qpn.variables,
-          qpn.var_indices)
+    qpnf = deepcopy(qpn)
+    empty!(qpnf.network_edges)
+    empty!(qpnf.reachable_nodes)
+    empty!(qpnf.network_depth_map)
+    add_edges!(qpnf, [])
+    qpnf 
 end
 
 function get_flat_initialization(qpn::QPNet; x0 = zeros(length(qpn.variables)))
@@ -146,7 +154,7 @@ function add_constraint!(qp_net, cons, lb, ub; tol=1e-8)
     return id
 end
 
-function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
+function add_qp!(qp_net, cost, con_inds, private_vars...; tol=1e-8)
     grad = Symbolics.gradient(cost, qp_net.variables)
     Q = Symbolics.sparsejacobian(grad, qp_net.variables)
     rows,cols,vals = findnz(Q)
@@ -156,9 +164,12 @@ function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
     catch err
         error("Detected non-quadratic cost!")
     end
-    q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
+    q = map(x->Float64(Num(x).val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
+    k = map(x->Float64(Num(x).val), Symbolics.substitute(cost, Dict(v => 0.0 for v in qp_net.variables)))
+    #q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
+    #k = map(x->Float64(x.val), Symbolics.substitute(cost, Dict(v => 0.0 for v in qp_net.variables)))
     droptol!(Q, tol)
-    f = Quadratic(Q, q)
+    f = Quadratic(Q, q, k)
     var_inds = mapreduce(vcat, private_vars; init = Int[]) do var
         inds = Vector{Int}()
         foreach(vi->push!(inds, qp_net.var_indices[vi]), var)
@@ -166,23 +177,117 @@ function add_qp!(qp_net, level, cost, con_inds, private_vars...; tol=1e-8)
     end
     player_id = maximum(keys(qp_net.qps), init=0) + 1
     qp_net.qps[player_id] = QP(f, con_inds, var_inds)
-    if level in keys(qp_net.network)
-        push!(qp_net.network[level], player_id)
-    else
-        qp_net.network[level] = Set(player_id)
-    end
+    #if level in keys(qp_net.network)
+    #    push!(qp_net.network[level], player_id)
+    #else
+    #    qp_net.network[level] = Set(player_id)
+    #end
     return player_id
 end
 
+"""
+Deletes edges that are redundant in the adjacency matrix. Returns 
+the minimal adjacency matrix as well as the reachability matrix,
+where the R[i,j] = true if node j is reachable from node i.
+
+If cyclic graphs are detected, returns an error, since cycles result in degenerate 
+equilibrium points.
+
+This is not the fastest implementation of this algorithm, but this is
+for a non-critical path (setup).
+"""
+function create_minimal_adj_matrix(N, edge_list)
+    A = zeros(Bool, N, N)
+    for (i,j) in edge_list
+        if i == j
+            error("Cannot have self edges. (In this case, node $i -> $i).")
+        end
+        A[i,j] = true
+    end
+
+    R = zeros(Bool, N, N) # transition matrix
+    Aⁿ = copy(A)
+    edge_deleted = false
+    for n = 2:N
+        R .|= Aⁿ
+        Aⁿ = (Aⁿ * A) .> 0
+        for i = 1:N
+            if Aⁿ[i,i]
+                error("Cycle detected. (In this case, cycle leading from node $i -> $i after $n transitions.")
+            end
+            for j = 1:N
+                if A[i,j] && Aⁿ[i,j]
+                    A[i,j] = false
+                    #@info "Deleting $i -> $j (found alternate path using $n transitions)"
+                end
+            end
+        end
+    end
+    A, R
+end
+
+"""
+Uses the reachability matrix R to compute a depth map.
+The nodes at depth d only have dependences on nodes of depth d+1 or greater. 
+Any node in the graph can be reached from at least one of the nodes at depth 1.
+"""
+function create_depth_map(R)
+    depth_map = Dict{Int, Set{Int}}()
+    N = size(R,1)
+    deleted_nodes = Set()
+    d = 0
+    Rd = copy(R)
+    while length(deleted_nodes) < N
+        nodes_at_depth = setdiff(Set([i for i in 1:N if !any(Rd[:,i])]), deleted_nodes)
+        if length(nodes_at_depth) > 0
+            d += 1
+            depth_map[d] = nodes_at_depth
+            union!(deleted_nodes, nodes_at_depth)
+            remaining_nodes = setdiff(1:N, deleted_nodes)
+            Rd = R[remaining_nodes,:]
+        else
+            error("Something appears wrong with the graph structure. There should always be nodes found for every increasing depth")
+        end
+    end
+    @assert sum(sum(R[i,:] for i in depth_map[1]) .> 0) == N - length(depth_map[1])
+    depth_map
+end
+
+"""
+Add edges to the qp_net
+"""
+function add_edges!(qp_net, edge_list)
+    N = length(qp_net.qps)
+    A, R = create_minimal_adj_matrix(N, edge_list)
+    depth_map = create_depth_map(R)
+    for (d, nodes) in depth_map
+        qp_net.network_depth_map[d] = nodes
+    end
+    for i in 1:N
+        qp_net.network_edges[i] = Set(collect(1:N)[A[i,:]])
+        qp_net.reachable_nodes[i] = Set(collect(1:N)[R[i,:]])
+    end
+end
+
+"""
+If group_map[constraint_id][player_a] == group_map[constraint_id][player_b], then 
+player_a and player_b share a multiplier for constraint_id.
+
+If no group_map is provided for a particular constraint, it is assumed that each player has a unique multiplier associated with the constriant.
+"""
 function assign_constraint_groups!(qp_net; group_map=Dict{Int, Dict{Int, Int}}())
     # TODO make dirty flag, set until this is called
     for (con_id, constraint) in qp_net.constraints
         for (player_id, qp) in qp_net.qps
             if con_id in qp.constraint_indices
-                group_id = 
-                    (con_id ∈ keys(group_map)) && (player_id ∈ keys(group_map[con_id])) ? 
-                    group_map[con_id][player_id] : 
-                    player_id
+                if con_id ∈ keys(group_map)
+                    if player_id ∉ keys(group_map[con_id])
+                        error("A group map is provided for constraint $con_id, but it does not contain mappings for all players who respect this constraint (namely player $player_id).")
+                    end
+                    group_id = group_map[con_id][player_id]
+                else
+                    group_id = player_id
+                end
                 constraint.group_mapping[player_id] = group_id
             end
         end
@@ -208,13 +313,21 @@ function display_solution(qpn::QPNet, x)
 end
 
 function num_levels(qpn::QPNet)
-    length(qpn.network)
+    length(qpn.network_depth_map)
 end
 
 function gather(qpn::QPNet, level)
-    qps = Dict(i=>qpn.qps[i] for i in qpn.network[level])
+    qps = Dict(i=>qpn.qps[i] for i in qpn.network_depth_map[level])
     constraints = Dict{Int, Constraint}(id=>qpn.constraints[id] for qp in values(qps) for id in qp.constraint_indices)
     QEP(qps, constraints)
+end
+
+function decision_inds(qpn::QPNet, id)
+    inds = copy(qpn.qps[id].var_indices)
+    for i in qpn.reachable_nodes[id]
+        append!(inds, qpn.qps[i].var_indices)
+    end
+    Set(inds) |> collect |> sort
 end
 
 function fair_obj(qep::QEP)
@@ -222,16 +335,16 @@ function fair_obj(qep::QEP)
 end
 
 function fair_obj(qpn::QPNet, level)
-    sum([qpn.qps[i].f for i in qpn.network[level]])
+    sum([qpn.qps[i].f for i in qpn.network_depth_map[level]])
 end
 
 function level_indices(qpn::QPNet, level)
-    reduce(vcat, (qpn.qps[i].var_indices for i in qpn.network[level]))
+    reduce(vcat, (qpn.qps[i].var_indices for i in qpn.network_depth_map[level]))
 end
 
 function sub_indices(qpn::QPNet, level)
-    L = length(qpn.network)
-    reduce(vcat, (qpn.qps[i].var_indices for l in level+1:L for i in qpn.network[l]))
+    L = length(qpn.network_depth_map)
+    reduce(vcat, (qpn.qps[i].var_indices for l in level+1:L for i in qpn.network_depth_map[l]))
 end
 
 function subeq_indices(qpn::QPNet, level)

@@ -372,6 +372,42 @@ function closure(p::IntersectionPoly)
 end
 
 """
+Determine whether P1 ⊆ P2, i.e. if P1 is a subset of P2.
+"""
+function Base.issubset(P1::Poly, P2::Poly; tol=1e-6)
+    (; A, l, u) = vectorize(P1)
+    A1 = A; l1 = l; u1 = u;
+    (; A, l, u) = vectorize(P2)
+    A2 = A; l2 = l; u2 = u;
+
+    m = length(l2)
+    for i = 1:m
+        for (bound, dir) in zip((l2[i], u2[i]), (1.0, -1.0))
+            if isfinite(bound)
+                model = OSQP.Model()
+                OSQP.setup!(model; 
+                            q = dir*collect(A2[i,:]), 
+                            A=sparse(A1), 
+                            l=l1, 
+                            u=u1, 
+                            verbose=false, 
+                            polish=true, 
+                            eps_abs=tol, 
+                            eps_rel=tol)
+                ret = OSQP.solve!(model)
+                if ret.info.status_val != 1
+                    return false # appears unbounded below
+                elseif ret.info.obj_val < dir*bound - tol
+                    return false
+                end
+            end
+        end
+    end
+    return true
+end
+
+
+"""
 Convert to Polyhedra.jl polyhedron object. #TODO should probably use this format everywhere
 
 NOTE assumes that p is a closed polyhedron. 
@@ -404,44 +440,81 @@ function get_verts(p; tol=1e-6)
     hr = get_Polyhedron_hrep(p; tol)
     vr = Polyhedra.doubledescription(hr)
     if length(vr.points.points) == 0
-        error("There should be at least one vertex in a non-empty pointed cone")
+        (; empty, example) = exemplar(p)
+         if intrinsic_dim(p) == 0 && !empty
+            return (; V = [example], R=Vector{Float64}[], L=Vector{Float64}[])
+         else
+            error("There should be at least one vertex in a non-empty pointed cone")
+        end
     end
     (; V = vr.points.points, R = vr.rays.rays, L = vr.rays.lines.lines)
+end
+
+"""
+Converts a Polyhedra.VRep object to a QPN Poly object
+"""
+function vrep_to_poly(vr)
+    polyh = polyhedron(vr)
+    #proj_hr = hrep(projected)
+    HS = Polyhedra.halfspaces(polyh)
+    HP = Polyhedra.hyperplanes(polyh)
+    dim = 0
+    if length(HS) == 0
+        AUi = nothing
+        ni = 0
+    else
+        AUi = mapreduce(vcat, HS) do hs
+            [hs.a' hs.β]
+        end
+        ni = size(AUi,1)
+        dim = size(AUi, 2)
+    end
+    if length(HP) == 0
+        AUe = nothing
+        ne = 0
+    else
+        AUe = mapreduce(vcat, HP) do hp
+            [hp.a' hp.β]
+        end
+        ne = size(AUe,1)
+        dim = size(AUe, 2)
+    end
+    if dim == 0 
+        error("Vrep appears to be empty")
+    else
+        if isnothing(AUi)
+            AUi = zeros(0, dim)
+        end
+        if isnothing(AUe)
+            AUe = zeros(0, dim)
+        end
+    end
+    A = sparse([AUi[:,1:end-1]; AUe[:,1:end-1]])
+    l = Vector{Float64}([fill(-Inf, ni); AUe[:,end]])
+    u = Vector{Float64}([AUi[:,end]; AUe[:,end]])
+    Poly(A,l,u)
 end
 
 """
 Project the poly into lower embedded dimension.
 """
 function project(p::Poly, keep_dims; tol=1e-6)
-    hr = get_Polyhedron_hrep(simplify(p); tol)
+    hr = get_Polyhedron_hrep(p; tol)
     poly = Polyhedra.polyhedron(hr)
     vr = vrep(poly)
-
 
     N = embedded_dim(p)
 
     Pmat = sparse(I, N, N)
     Pmat = Pmat[keep_dims, :]
 
-    projected_points::Vector{Vector{Float64}} = map(point->Pmat*point, points(vr))
-    projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(ray->Pmat*ray, rays(vr))
-    projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, lines(vr))
+    projected_points::Vector{Vector{Float64}} = map(point->Pmat*point, Polyhedra.points(vr))
+    projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(ray->Pmat*ray, Polyhedra.rays(vr))
+    projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, Polyhedra.lines(vr))
 
     proj_vr = vrep(projected_points, projected_lines, projected_rays)
-    projected = polyhedron(proj_vr)
-    #proj_hr = hrep(projected)
-    AUi = mapreduce(vcat, Polyhedra.halfspaces(projected); init=zeros(0, length(keep_dims)+1)) do hs
-        [hs.a' hs.β]
-    end
-    AUe = mapreduce(vcat, Polyhedra.hyperplanes(projected); init=zeros(0,length(keep_dims)+1)) do hp
-        [hp.a' hp.β]
-    end
-    ni = size(AUi,1)
-    ne = size(AUe,1)
-    A = sparse([AUi[:,1:end-1]; AUe[:,1:end-1]])
-    l = Vector{Float64}([fill(-Inf, ni); AUe[:,end]])
-    u = Vector{Float64}([AUi[:,end]; AUe[:,end]])
-    ProjectedPoly(Poly(A,l,u), p)
+    projected = vrep_to_poly(proj_vr)
+    ProjectedPoly(projected, p)
 end
 
 
@@ -470,14 +543,27 @@ function poly_slice(poly::IntersectionPoly, x::Vector{Union{Float64, Missing}})
 end
 
 function exemplar(poly::Poly; tol=1e-4, debug=false)
+
+
+
+
     m = OSQP.Model()
     n = length(poly)
     n == 0 && return (; empty=false, example=nothing)
     (; A,l,u,rl,ru) = vectorize(poly)
     d = size(A,2)
+    (; open_low, open_hi) = open_bounds(l,u,rl,ru)
+
+    if isapprox(l, u; atol=tol, rtol=tol) && sum(open_low) == 0 && sum(open_hi) == 0
+        x = A\l 
+        if isapprox(A*x, l; atol=tol, rtol=tol)
+            return (; empty=false, example=x)
+        else
+            return (; empty=true, example=nothing)
+        end
+    end
 
     AA = [[A; A] zeros(2n); zeros(1,d+1)]
-    (; open_low, open_hi) = open_bounds(l,u,rl,ru)
     l = [l; fill(-Inf, n); 0]
     u = [fill(Inf, n); u; 1]
     AA[1:n,end] = -1.0 * open_low
@@ -741,6 +827,24 @@ function Base.lastindex(pu::PolyUnion)
     lastindex(pu.polys)
 end
 
+function remove_subsets(pu::PolyUnion)
+    is_subset = zeros(Bool, length(pu))
+    #Threads.@threads for i in 1:length(pu)
+    # Multithreading in this manner can cause an over-elimination of polys,
+    # when two sets are subsets of eachother. Need to fix before re-enabling
+    for i in 1:length(pu)
+        if any(i ≠ j && !is_subset[j] && pu[i] ⊆ p for (j,p) in enumerate(pu))
+            is_subset[i] = true
+        end
+    end
+    proper_sets = pu[.!is_subset]
+    sum(is_subset) > 0 && @debug "Removed $(sum(is_subset)) redundant sets."
+    return PolyUnion(proper_sets)
+end
+function remove_subsets(pu::Nothing)
+    nothing
+end
+
 """
 Return true if x is an element of pu.
 """
@@ -769,6 +873,22 @@ end
 """
 Intersect p with polys.
 """
+
+function poly_intersect(p::Poly, ps::Poly...)
+    if p isa IntersectionPoly
+        polys = p.polys
+    else
+        polys = [p]
+    end
+    for pp in ps
+        if pp isa IntersectionPoly
+            append!(polys, pp.polys)
+        else
+            push!(polys, p)
+        end
+    end
+    IntersectionPoly(polys)
+end
 function poly_intersect(p::Union{BasicPoly, ProjectedPoly}...)
     d = embedded_dim(first(p))
     @assert all(embedded_dim(psi) == d for psi in p)
@@ -780,6 +900,14 @@ function poly_intersect(p::Union{BasicPoly, ProjectedPoly}, ip::IntersectionPoly
     IntersectionPoly([p; ip.polys])
 end
 
+function poly_intersect(p::IntersectionPoly...)
+    @assert allequal(embedded_dim(pp) for pp in p)
+    all_polys = mapreduce(vcat, p) do pp
+        pp.polys
+    end
+    IntersectionPoly(all_polys)
+end
+
 """
 Intersect unions of polyhedra. (returns an iterator)
 """
@@ -787,3 +915,45 @@ function poly_intersect(p::PolyUnion, ps::PolyUnion...)
     unions = (poly_intersect(subpieces...) for subpieces in Iterators.product(p, ps...))
 end
 
+function convex_hull2(pu::PolyUnion)
+    VV = Set{QuantizedVector}() 
+    LL = Set{QuantizedVector}() 
+    RR = Set{QuantizedVector}()
+    for p in pu
+        (; V, L, R) = get_verts(p)
+        foreach(v->push!(VV,QuantizedVector(v=v)), V)
+        foreach(l->push!(LL,QuantizedVector(v=l.a)), L)
+        foreach(r->push!(RR,QuantizedVector(v=r.a)), R)
+    end
+    VV = map(collect(VV)) do v
+        v.v
+    end
+    LL = map(collect(LL)) do l
+        Polyhedra.Line(l.v)
+    end
+    RR = map(collect(RR)) do r
+        Polyhedra.Ray(r.v)
+    end
+    vr = vrep(VV,LL,RR)
+    vrep_to_poly(vr)
+end
+function convex_hull(pu::PolyUnion; tol=1e-6)
+    polyhedra = map(pu) do p 
+        hr = get_Polyhedron_hrep(simplify(p); tol)
+        poly = Polyhedra.polyhedron(hr)
+        vr = vrep(poly)
+        poly
+    end
+    hull = Polyhedra.convexhull(polyhedra...)
+    Polyhedra.removevredundancy!(hull)
+    vr = vrep(hull)
+    vrep_to_poly(vr)
+end
+
+"""
+Determine whether P1 ⊆ P2, i.e. if P1 is a subset of P2.
+"""
+function Base.issubset(P1::Poly, P2::PolyUnion; tol=1e-6)
+    @warn "Determining subset relations are hard for unions of polyhedra. This method is therefore not guaranteed to be correct. Return values of 'true' are correct, whereas a 'false' return may not actually imply a negative result."
+    any(P1 ⊆ P for P in P2)
+end

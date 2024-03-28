@@ -1,5 +1,3 @@
-using QPN
-
 function setup(::Val{:bilevel_escape}; kwargs...)
     x = QPN.variables(:x, 1:2) 
     y = QPN.variables(:y, 1:2) 
@@ -15,13 +13,14 @@ function setup(::Val{:bilevel_escape}; kwargs...)
     con_id2 = QPN.add_constraint!(qp_net, cons2, lb.-1, ub.+1)
            
     cost = 0.5*(y[1]-x[1])^2 + 0.5*(y[2]-x[2])^2
-    level = 2
-    QPN.add_qp!(qp_net, level, cost, [con_id1,], y)
+    qp_id2 = QPN.add_qp!(qp_net, cost, [con_id1,], y)
 
     cost = y[1]-x[1]
-    level = 1
-    QPN.add_qp!(qp_net, level, cost, [con_id2,], x)
-    
+    qp_id1 = PN.add_qp!(qp_net, cost, [con_id2,], x)
+   
+    edge_list = [(qp_id1, qp_id2)]
+
+    QPN.add_edges!(qp_net, edge_list)
     QPN.assign_constraint_groups!(qp_net)
     QPN.set_options!(qp_net; kwargs...)
     

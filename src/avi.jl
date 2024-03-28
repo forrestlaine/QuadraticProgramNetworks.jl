@@ -21,6 +21,7 @@ Represents a generalized affine variational inequality
 
 (Mz + Nw + o) ⟂ (l₁ ≤  z₁   ≤ u₁)
 (     z₂    ) ⟂ (l₂ ≤ Az+Bw ≤ u₂)
+z = [z₁; z₂]
 
 Possible todo: add support for following conditions.
 (M₃z + N₃w + o₃) ⟂ (l₃ ≤ A₃z+B₃w ≤ u₃)
@@ -38,6 +39,20 @@ struct GAVI
 end
 
 """
+Represents a general linear complementarity problem.
+M z + q ⟂ l ≤ Az ≤ u
+
+Here, z need not be of the same dimension as q, l, or u.
+"""
+struct GLCP
+    M::SparseMatrixCSC{Float64, Int32}
+    q::Vector{Float64}
+    A::SparseMatrixCSC{Float64, Int32}
+    l::Vector{Float64}
+    u::Vector{Float64}
+end
+
+"""
 Given M, L, o, l, u, w,
 Find z, u, v, s.t.:
     u - v = M z + N w + o
@@ -50,15 +65,16 @@ function solve_avi(avi::AVI, z0, w)
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
                                                    silent=true, 
                                                    convergence_tolerance=1e-8, 
-                                                   cumulative_iteration_limit=100000,
+                                                   cumulative_iteration_limit=200000,
+                                                   major_iteration_limit=1000,
                                                    restart_limits=5,
                                                    lemke_rank_deficiency_iterations=1000)
     (; sol_bad, degree, r) = check_avi_solution(avi, z, w)
     if sol_bad
-        return (; z, status=FAILURE)
+        return (; z, status=FAILURE, info=(;path_status, info))
     end
     status = (path_status == PATHSolver.MCP_Solved || path_status == PATHSolver.MCP_Solved) ? SUCCESS : FAILURE
-    return (; z, status)
+    return (; z, status, info=(; path_status, info))
 end
 
 function find_closest_feasible!(gavi, z0, w)
@@ -78,8 +94,8 @@ function find_closest_feasible!(gavi, z0, w)
     ret = OSQP.solve!(model)
     if ret.info.status_val == 1
         z0 .= ret.x
-    #else
-        #@warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
+    else
+        @warn "Feasible initialization not cleanly solved. Solve status: $(ret.info.status)"
     end
 end
 
@@ -90,9 +106,9 @@ function solve_gavi(gavi::GAVI, z0, w; presolve=true)
     d2 = length(gavi.l2)
     s = gavi.A*z0+gavi.B*w
     z0s = copy([z0; s])
-    (; z, status) = solve_avi(avi, z0s, w)
+    (; z, status, info) = solve_avi(avi, z0s, w)
     zg = z[1:d1+d2]
-    (; z=zg, status)
+    (; z=zg, status, info)
 end
 
 function convert(gavi::GAVI)
@@ -140,12 +156,232 @@ function check_avi_solution(avi, z, w; tol=1e-6)
     return (; sol_bad = bad_count > 0, degree = bad_count, r)
 end
 
+function create_glcps_from_qps(qp_net, id, solution_graphs)
+    dvars = decision_inds(qp_net, id) 
+    n = length(dvars)
+    qp = qp_net.qps[id]
+    n_total = size(qp.f.Q,2)
+    
+    # Z = [x; ξᵢ; λᵢ; ψᵢ]
+    # cons = [M1*Z + q1 ⟂ l1 ≤ ξᵢ   ≤ u1;
+    #        [[λᵢ; ψᵢ]  ⟂ l2 ≤ M2*Z ≤ u2]
+    
+    labels = Dict{String, Int}()
+    for i in 1:n_total
+        labels["x_$i"] = i
+    end
+    for (e,i) in enumerate(dvars)
+        labels["ξ_$(id)_$(i)"] = n_total+e
+    end
+    total = n_total+n
+
+    A,l,u = map(qp.constraint_indices) do ci
+        (; A, l, u) = vectorize(qp_net.constraints[ci].poly)
+        for i in 1:size(A,1)
+            labels["λ_$(id)_$(ci)_$i"] = total+i
+        end
+        total += size(A,1)
+        A, l, u
+    end |> (x->vcat.(x...))
+
+    A_Si, l_Si, u_Si = isempty(qp_net.network_edges[id]) ? (spzeros(0, n_total), zeros(0), zeros(0)) :
+    map(collect(qp_net.network_edges[id])) do j
+        (; A, l, u) = vectorize(solution_graphs[j])        
+        for i in 1:size(A,1)
+            labels["ψ_$(id)_$(j)_$i"] = total+i
+        end
+        total += size(A,1)
+        A, l, u
+    end |> (x->vcat.(x...))
+    
+    M1 = [qp.f.Q[dvars, :] -sparse(I, n, n) -A[:,dvars]' -A_Si[:,dvars]']
+    q1 = qp.f.q[dvars]
+    M2 = [A; A_Si]
+    l2 = [l; l_Si]
+    u2 = [u; u_Si]
+
+    (; dvars, labels, M1, q1, M2, l2, u2)
+end
+
+function create_labeled_gavi_from_qp(qp_net, id, solution_graphs)
+    dvars = decision_inds(qp_net, id) 
+    n = length(dvars)
+    qp = qp_net.qps[id]
+    n_total = size(qp.f.Q,2)
+    
+    # Z = [x; ξᵢ; λᵢ; ψᵢ]
+    # cons = [M1*Z + q1 ⟂ l1 ≤ ξᵢ   ≤ u1;
+    #        [[λᵢ; ψᵢ]  ⟂ l2 ≤ M2*Z ≤ u2]
+    
+    labels = Dict{String, Int}()
+    for i in 1:n_total
+        labels["x_$i"] = i
+    end
+    for (e,i) in enumerate(dvars)
+        labels["ξ_$(id)_$(i)"] = n_total+e
+    end
+    total = n_total+n
+
+    A_i,l_i,u_i = length(qp.constraint_indices) == 0 ? (spzeros(0, n_total), zeros(0), zeros(0)) :
+    map(qp.constraint_indices) do ci
+        (; A, l, u) = vectorize(qp_net.constraints[ci].poly)
+        for i in 1:size(A,1)
+            labels["λ_$(id)_$(ci)_$i"] = total+i
+        end
+        total += size(A,1)
+        A, l, u
+    end |> (x->vcat.(x...))
+
+    A_Si, l_Si, u_Si = isempty(qp_net.network_edges[id]) ? (spzeros(0, n_total), zeros(0), zeros(0)) :
+    map(collect(qp_net.network_edges[id])) do j
+        (; A, l, u) = vectorize(solution_graphs[j])        
+        for i in 1:size(A,1)
+            labels["ψ_$(id)_$(j)_$i"] = total+i
+        end
+        total += size(A,1)
+        A, l, u
+    end |> (x->vcat.(x...))
+
+    M1 = [qp.f.Q[dvars, :] 0*-sparse(I, n, n) -A_i[:,dvars]' -A_Si[:,dvars]']
+    q1 = qp.f.q[dvars]
+    M2 = [A_i; A_Si]
+    l2 = [l_i; l_Si]
+    u2 = [u_i; u_Si]
+
+    (; dvars, labels, M1, q1, M2, l2, u2)
+end
+
+#function finalize_gavi(n, labeled_gavi)
+#    # M1 [x; ξ; λ; ψ] + q1 = 0
+#    # [λ; ψ] ⟂ l2 ≤ M2 x ≤ u2
+#   
+#    labels = labeled_gavi.labels
+#    x_locations = map(1:n) do i
+#        labels["x_$i"]
+#    end
+#    dec_inds = labeled_gavi.dvars
+#    param_inds = setdiff(1:n, dec_inds)
+#    dec_locations = x_locations[dec_inds]
+#    param_locations = x_locations[param_inds]
+#    ξ_locations = [i for (l,i) in labels if startswith(l, "ξ")]
+#    λ_locations = [i for (l,i) in labels if startswith(l, "λ")]
+#    ψ_locations = [i for (l,i) in labels if startswith(l, "ψ")]
+#    main_locations = [dec_locations; λ_locations; ψ_locations]
+#    sec_locations = [param_locations; ξ_locations]
+#
+#    M = labeled_gavi.M1[:, main_locations]
+#    n = length(main_locations)
+#    N = labeled_gavi.M1[:, sec_locations]
+#    o = labeled_gavi.q1
+#    l1 = fill(-Inf, length(o))
+#    u1 = fill(+Inf, length(o))
+#
+#    m = length(labeled_gavi.l2)
+#    A = [labeled_gavi.M2[:, dec_inds] spzeros(m, n-length(dec_inds))]
+#    B = [labeled_gavi.M2[:, param_inds] spzeros(m, length(ξ_locations))]
+#    l2 = labeled_gavi.l2
+#    u2 = labeled_gavi.u2
+#
+#    x_locations = map(1:n) do i
+#        dec_i = findfirst(dec_inds .== i)
+#        if !isnothing(dec_i)
+#            (:primary,dec_i)
+#        else
+#            param_i = findfirst(param_inds .== i)
+#            (:secondary,param_i)
+#        end
+#    end
+#
+#    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
+#    gavi, x_locations
+#end
+
+
+"""
+Generalized AVI setup for Nash Equilibrium Problem.
+
+Z := [dvars; [ξᵢ for i in pool];  [[λᵢ; ψᵢ] for i in pool]]
+
+"""
+function combine_gavis(n, dec_inds, param_inds, labeled_gavis)
+
+    nd = length(dec_inds)
+    total_dual_dim = 0
+    total_ξ_dim = 0
+    for (id, lgavi) in labeled_gavis
+        total_dual_dim += (size(lgavi.M1, 2) - n)
+        total_ξ_dim += (size(lgavi.M1,1))
+    end
+    ξ_offset_ranges = Dict{Int, AbstractVector{Int}}()
+    λψ_offset_ranges = Dict{Int, AbstractVector{Int}}()
+    offset1 = 0
+    offset2 = total_ξ_dim
+
+    player_pool = collect(keys(labeled_gavis)) |> sort
+
+    M, N, q = map(player_pool) do id
+
+        lgavi = labeled_gavis[id]
+
+        M = lgavi.M1
+        q = lgavi.q1
+
+        dual_dim = size(M,2) - n
+        ξ_dim = size(M,1)
+        λψ_dim = dual_dim - ξ_dim
+
+        ξ_offset_ranges[id] = offset1+1:offset1+ξ_dim
+        λψ_offset_ranges[id] = offset2+1:offset2+λψ_dim   
+
+        Mi = spzeros(size(M,1), nd+total_dual_dim)
+        Mi[:,1:nd] = M[:, dec_inds]
+
+        Mi[:,nd.+ξ_offset_ranges[id]] =  M[:,n+1:n+ξ_dim]
+        Mi[:,nd.+λψ_offset_ranges[id]] = M[:,n+ξ_dim+1:end]
+        Ni = M[:,param_inds]
+
+        offset1 += ξ_dim
+        offset2 += λψ_dim
+
+        Mi, Ni, q  
+    end |> (x->vcat.(x...))
+    
+    A, B, l2, u2 = map(player_pool) do id
+        lgavi = labeled_gavis[id]
+        A = lgavi.M2
+        l = lgavi.l2
+        u = lgavi.u2
+        A[:,dec_inds], A[:,param_inds], l, u
+    end |> (x->vcat.(x...))
+
+    top_M = spzeros(nd, size(M,2))
+    top_N = spzeros(nd, size(N,2))
+    top_q = zeros(nd)
+    
+    for (id, lgavi) in labeled_gavis
+        ξ_offset_range = ξ_offset_ranges[id]
+        for (di, d) in enumerate(dec_inds)
+            if d in lgavi.dvars
+                top_M[di, nd+ξ_offset_range[lgavi.labels["ξ_$(id)_$d"]-n]] = 1.0
+            end
+        end
+    end
+
+    M = [top_M; M]
+    N = [top_N; N]
+    o = [top_q; q]
+    l1 = fill(-Inf, length(o))
+    u1 = fill(+Inf, length(o))
+    A = [A spzeros(size(A,1), total_dual_dim)]
+
+    gavi = GAVI(M, N, o, l1, u1, A, B, l2, u2)
+end
+
 """
 Solve the Quadratic Equilibrium Problem.
 """
-function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decision_inds=Vector{Int}();
+function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
                    var_indices=nothing,
-                   level=0,
                    subpiece_index=0,
                    debug=false,
                    request_comes_from_parent=false,
@@ -156,213 +392,76 @@ function solve_qep(qep_base, x, request, relaxable_inds, S=nothing, shared_decis
                    rng=MersenneTwister(1))
 
     x_dim = length(x)
-    N_players = length(qep_base.qps)
+    dec_inds = union((decision_inds(qp_net, id) for id in player_pool)...) |> sort
+    param_inds = setdiff(1:x_dim, dec_inds)
 
-    if isnothing(S)
-        qep = qep_base
-        aux_dim = 0
-        underconstrained=false
-        @assert length(shared_decision_inds) == 0
-    else
-        qep = deepcopy(qep_base)
-        foreach(qp->push!(qp.constraint_indices, -1), values(qep.qps))
-        if shared_variable_mode==SHARED_DUAL
-            qep.constraints[-1] = Constraint(S, Dict(i=>1 for i in keys(qep.qps))) 
-        elseif shared_variable_mode==MIN_NORM
-            qep.constraints[-1] = Constraint(S, Dict(i=>i for i in keys(qep.qps))) 
-        end
-        aux_dim = embedded_dim(S) - x_dim
-        constrained_lower = embedded_dim(S) - intrinsic_dim(S)
-        underconstrained = constrained_lower < (aux_dim + length(shared_decision_inds))
-        @assert length(shared_decision_inds) > 0
-    end
-    player_order = collect(keys(qep.qps)) |> sort
-    constraint_order = collect(keys(qep.constraints)) |> sort
-
-    private_decision_inds = reduce(vcat, (qep.qps[k].var_indices for k in player_order)) #|> sort
-    decision_inds = [private_decision_inds; shared_decision_inds]
-    
-    N_shared_vars = length(shared_decision_inds) + aux_dim
-    N_private_vars = sum(length.(private_decision_inds))
-   
-    standard_dual_dim = sum(length(Set(values(C.group_mapping)))*length(C.poly) for C in values(qep.constraints))
-
-    param_inds = setdiff(Set(1:x_dim), Set(decision_inds)) |> collect #|> sort
-    
-    Qs, Mψ, Rs, qs = map(player_order) do i
-        qp = qep.qps[i]
-        inds = [qp.var_indices; shared_decision_inds]
-        Q = [[qp.f.Q[inds, decision_inds]; spzeros(aux_dim, length(decision_inds))] spzeros(length(inds)+aux_dim, aux_dim)]
-        M = mapreduce(hcat, player_order) do j
-            j == i ? 
-            [spzeros(length(qp.var_indices), N_shared_vars); -sparse(I, N_shared_vars, N_shared_vars)] :
-            spzeros(length(qp.var_indices)+N_shared_vars, N_shared_vars)
-        end
-        R = [qp.f.Q[inds, param_inds]; spzeros(aux_dim, length(param_inds))]
-        q = [qp.f.q[inds]; zeros(aux_dim)]
-        Q, M, R, q
-    end |> (x->vcat.(x...))
-    
-
-    offset = N_private_vars + (N_players+1)*N_shared_vars
-    S_dual_inds = nothing
-    As, A2s, Bs, ls, us = map(constraint_order) do id
-        (; A,l,u) = vectorize(qep.constraints[id].poly)
-        con_dim = length(l)
-        if id == -1
-            S_dual_inds = collect(offset+1:offset+con_dim)
-        else
-            offset += con_dim
-        end
-        local_aux_dim = size(A,2) - x_dim
-        player_to_group_map = qep.constraints[id].group_mapping
-        group_to_player_map = Dict{Int, Vector{Int}}()
-        for (player, group) in player_to_group_map
-            if group ∈ keys(group_to_player_map)
-                push!(group_to_player_map[group], player)
-            else
-                group_to_player_map[group] = [player,]
-            end
-        end
-        group_labels = keys(group_to_player_map) |> collect |> sort
-        num_groups = length(group_labels)
-
-        A1 = repeat(A[:, decision_inds], num_groups)
-        Ax = (local_aux_dim > 0) ? repeat(A[:, x_dim+1:x_dim+local_aux_dim], num_groups) : spzeros(num_groups*length(l), aux_dim)
-        B1 = repeat(A[:, param_inds], num_groups)
-        l1 = repeat(l, num_groups)
-        u1 = repeat(u, num_groups)
-        A2 = mapreduce(vcat, group_labels) do gid
-            mapreduce(hcat, player_order) do pid
-                inds = [qep.qps[pid].var_indices; shared_decision_inds]
-                if pid ∈ group_to_player_map[gid]
-                    Ainds = A[:, inds]
-                    Aaux = (local_aux_dim > 0) ? A[:, x_dim+1:x_dim+local_aux_dim] : spzeros(length(l), aux_dim)
-                    [Ainds Aaux]
-                else
-                    spzeros(length(l), length(inds)+aux_dim)
-                end
-            end
-        end
-        [A1 Ax], A2, B1, l1, u1
-    end |> (x->vcat.(x...))
-    
-    M11 = Qs
-    M12 = underconstrained ? Mψ : spzeros(size(Mψ))
-    M13 = -A2s'
-    M21 = spzeros(N_shared_vars, N_private_vars+N_shared_vars)
-    M22 = repeat(sparse(I, N_shared_vars, N_shared_vars), 1, N_players)
-    M23 = spzeros(N_shared_vars, standard_dual_dim)
-    M31 = As
-    M32 = spzeros(standard_dual_dim, N_shared_vars*N_players)
-    M33 = spzeros(standard_dual_dim, standard_dual_dim)
-
-    M = [M11 M12 M13;
-         M21 M22 M23]
-
-    N1 = Rs
-    N2 = spzeros(N_shared_vars, length(param_inds))
-    N3 = Bs
-
-    N = [N1; N2]
-
-    o = [qs; zeros(N_shared_vars)]
-
-    l1 = fill(-Inf, length(qs) + N_shared_vars)
-    u1 = fill(Inf, length(qs) + N_shared_vars)
-
-    A = [M31 M32 M33]
-    B = N3
-
-    l2 = ls
-    u2 = us
+    #glcps, z_labels = create_glcps_from_qps(qp_net, player_pool, S)
+    #gavi = combine_glcps(glcps, z_labels, dec_inds, param_inds)
+    labeled_gavis = Dict(id=>create_labeled_gavi_from_qp(qp_net, id, S) for id in player_pool)
+    gavi = combine_gavis(x_dim, dec_inds, param_inds, labeled_gavis)
 
     w = x[param_inds]
-   
     #       decision_vars       aux_vars                ψ vars                      dual_vars
-    z0 = [x[decision_inds]; zeros(aux_dim); zeros(N_players*N_shared_vars); zeros(standard_dual_dim)]
+    z0 = [x[dec_inds]; zeros(size(gavi.M,2)-length(dec_inds))]
+
     # TODO : if I want to support successive minimization of ||ψ|| over
     # iterations, need to properly warmstart with previous solution? Might
     # require reducing dimension AFTER psi minimization
+    (; z, status, info) = solve_gavi(gavi, z0, w)
 
-    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2)
-
-    (; z, status) = solve_gavi(gavi, z0, w)
     if status != SUCCESS
-        relaxable_parent_inds = setdiff(relaxable_inds, decision_inds)
-        relaxable_parent_inds = [findfirst(param_inds .== i) for i in relaxable_parent_inds]
-        if !isempty(relaxable_parent_inds) && request_comes_from_parent
-            debug && @info "AVI solve error, but some parameter variables can be relaxed. Constructing relaxed GAVI."
-            r_gavi = relax_gavi(gavi, relaxable_parent_inds)
-            r_z0 = [w[relaxable_parent_inds]; z0]
-            r_w = w[setdiff(1:length(w), relaxable_parent_inds)]
-            ret = solve_gavi(r_gavi, r_z0, r_w)
-            status = ret.status
-            if status != SUCCESS
-                error("AVI solve error, even after relaxing indices.")
-            end
-            l_r = length(relaxable_parent_inds)
-            w[relaxable_parent_inds] = ret.z[1:l_r]
-            z = ret.z[l_r+1:end]
-        else
-            error("AVI solve error!")
-        end
+        @infiltrate
+        error("AVI solve error. $(info)")
+    end
+
+    num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)
+    ξ = z[length(dec_inds)+1:length(dec_inds)+num_ξ]
+    if norm(ξ) > 1e-3 && false
+        @infiltrate
+        error("Detected disagreement in the values of decision variables. 
+              It seems that two or more nodes are granted control of the 
+              same unrestricted decision variables. The handling of such 
+              conflicts is currently disabled.")
     end
     
+    @debug "Found solution, now generating solution map."
+    x_opt = copy(x)
+    x_opt[dec_inds] = z[1:length(dec_inds)]
+    x_opt[param_inds] = w
+    return x_opt
+end
 
-    ψ_inds = collect(N_private_vars+N_shared_vars+1:N_private_vars+N_shared_vars*(N_players+1))
 
-    if high_dimension
-        throw(error("High dimension mode not supported at the moment"))
-        extra_rounds = level==1 ? 0 : 5
-        z_orig = z
-        (; piece, x_opt, reduced_inds, z) = get_single_solution(gavi,z,w,level,subpiece_index,decision_inds,param_inds,rng; debug=false, permute=false, extra_rounds, level)
-        z_inds_remaining = setdiff(1:length(z), reduced_inds)
-        z = z[z_inds_remaining] 
-        if length(ψ_inds) > 0 && underconstrained && shared_variable_mode == MIN_NORM
-            ψ_inds_remaining = setdiff(ψ_inds, reduced_inds)
-            f_min_norm = min_norm_objective(length(z), ψ_inds_remaining)
-            (; piece, x_opt, z_revised) = revise_avi_solution(f_min_norm, piece, z, w, decision_inds, param_inds, rng)
-        end
-	    @infiltrate !([z;w] in piece)
-	    xz_permuted = zeros(length(z)+length(w))
-	    xz_permuted[decision_inds] = z[1:length(decision_inds)]
-	    xz_permuted[param_inds] = w
-	    xz_permuted[length(decision_inds)+length(param_inds)+1:end] = z[length(decision_inds)+1:end]
-        permute!(piece, decision_inds, param_inds)
-	    @infiltrate !(xz_permuted in piece)
-        reduced_piece = eliminate_variables(piece, x_dim+1:embedded_dim(piece), xz_permuted)
-	    @infiltrate !(x_opt in reduced_piece)
-        @infiltrate embedded_dim(reduced_piece) > length(x_opt)
-        (; x_opt, Sol=[reduced_piece,], identified_request=nothing)
-    else
-        if shared_variable_mode == MIN_NORM
-            @error "not implemented yet" 
-        elseif shared_variable_mode == SHARED_DUAL
-            @debug "Found solution, now generating solution map (level $(level))"
-            x_opt = copy(x)
-            x_opt[decision_inds] = z[1:length(decision_inds)]
-            x_opt[param_inds] = w
+function process_solution_graph(qp, constraints, dec_inds, x, λ; exploration_vertices=0)
+    n = length(qp.f.q)
+    param_inds = setdiff(1:n, dec_inds)
+    nd = length(dec_inds)
+    np = length(param_inds)
+    z = [x[dec_inds]; λ]
+    w = x[param_inds]
 
-            # TODO figure out request structure with vertex expansion (is
-            # v-enum even required?)
-            Sol = gen_sol ? LocalGAVISolutions(gavi, z, w, level, subpiece_index, decision_inds, param_inds, request; max_vertices = 1000) : nothing
-            @debug "Solution map generated."
+    AA, l2, u2 = isempty(constraints) ? (spzeros(0, n), zeros(0), zeros(0)) :
+    map(constraints) do poly
+        (; A, l, u) = vectorize(poly)
+        A, l, u
+    end |> (x-> vcat.(x...))
 
-            # TODO : should probably propagate any parent level requests if
-            # they appear in S 
+    m = length(l2)
+    
+    # z = [x_d λ]; w = [x_p]
+    # Q*xd + q - A'*λ ⟂ -∞ ≤ xd ≤ ∞
+    # λ               ⟂ l  ≤ Axd + Bxp ≤ u
 
-            if isnothing(S) || !make_requests
-                identified_request = Set{Linear}()
-            else
-                S_duals = z[S_dual_inds]
-                identified_request = identify_request(S, S_duals, request; propagate=request_comes_from_parent)
-            end
-            (; x_opt, Sol, identified_request)
-        else
-            @error "Invalid shared variable mode: $shared_variable_mode."
-        end
-    end
+    M = [qp.f.Q[dec_inds, dec_inds] -AA[:,dec_inds]']
+    N = qp.f.Q[dec_inds, param_inds]
+    o = qp.f.q[dec_inds]
+    l1 = fill(-Inf, nd)
+    u1 = fill(+Inf, nd)
+    A = [AA[:,dec_inds] spzeros(m,m)]
+    B = AA[:,param_inds]
+
+    gavi = GAVI(M,N,o,l1,u1,A,B,l2,u2) 
+    LocalGAVISolutions(gavi, z, w, 0, 0, dec_inds, param_inds, Set{Linear}(); max_vertices=exploration_vertices)
 end
 
 function identify_request(S, λs, parent_request; propagate=false)
