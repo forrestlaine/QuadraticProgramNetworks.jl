@@ -279,51 +279,6 @@ function Base.eltype(gavi_sols::LocalGAVISolutions)
     Poly
 end
 
-function Base.collect(gavi_sols::LocalGAVISolutions)
-    while !isempty(gavi_sols.unexplored_Ks) #&& (!isempty(gavi_sols.unexplored_vertices) && length(gavi_sols.explored_vertices < gavi_sols.max_vertices))
-        expand_recipes!(gavi_sols) 
-        if isempty(gavi_sols.unexplored_vertices)
-            break
-        else
-            while !isempty(gavi_sols.unexplored_vertices) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices
-                v = pop!(gavi_sols.unexplored_vertices)
-                push!(gavi_sols.explored_vertices, v)
-                J = comp_indices(gavi_sols.gavi, v.v[1:length(gavi_sols.z)], v.v[length(gavi_sols.z)+1:end], gavi_sols.permuted_request)
-                Ks = all_Ks(J) |> (Ks -> setdiff(Ks, gavi_sols.explored_Ks))
-                union!(gavi_sols.unexplored_Ks, Ks)
-            end
-        end
-    end
-    return collect(gavi_sols.polys)
-end
-
-function expand_recipes!(gavi_sols::LocalGAVISolutions)
-    if !isempty(gavi_sols.unexplored_Ks)
-        expansions = map(collect(gavi_sols.unexplored_Ks)) do K
-            Threads.@spawn expand(gavi_sols.gavi, 
-                                  gavi_sols.z, 
-                                  gavi_sols.w, 
-                                  K, 
-                                  gavi_sols.level, 
-                                  gavi_sols.subpiece_index, 
-                                  gavi_sols.decision_inds, 
-                                  gavi_sols.param_inds)
-        end
-        results = fetch.(expansions)
-        for r in results
-            push!(gavi_sols.polys, r.piece)
-            for v in r.vertices
-                vert = QuantizedVector(v=v)
-                if vert ∉ gavi_sols.explored_vertices
-                    push!(gavi_sols.unexplored_vertices, vert)
-                end
-            end
-        end
-        union!(gavi_sols.explored_Ks, gavi_sols.unexplored_Ks)
-        empty!(gavi_sols.unexplored_Ks)
-    end
-end
-
 function Base.iterate(gavi_sols::LocalGAVISolutions)
     iter_ret = iterate(gavi_sols.polys)
     if isnothing(iter_ret)
@@ -369,7 +324,6 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
             end
             return (piece, gavi_sol_state)
         catch err
-            @infiltrate
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
     elseif !isempty(gavi_sols.unexplored_vertices) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
@@ -495,8 +449,7 @@ function local_piece(gavi::GAVI, n, m, K, level, subpiece_index; reducible_inds=
     end
 
     meaningful = find_non_trivial(A,l,u,reduced_inds)
-    piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful]))
-    (; piece, reduced_inds)
+    (; piece = simplify(Poly(A[meaningful,:], l[meaningful], u[meaningful])), reduced_inds)
 end
 
 """
@@ -513,7 +466,7 @@ J[5] = {i :      zᵢ = uᵢ, rᵢ < 0 }
 J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ free}
 """
 #function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
-function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}(); tol=1e-2)
+function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
     equal_bounds = isapprox.(l, u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
     d = size(M,2) + size(N,2)
@@ -555,9 +508,6 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
             push!(Ji,3)
         end
         if isempty(Ji)
-            if !equal_bounds[i]
-                @infiltrate
-            end
             @assert equal_bounds[i]
             push!(Ji, 4)
         end
@@ -573,7 +523,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
     #sum(length.(values(J))) < length(z) && throw(error("Z does not cleanly solve AVI"))
     return J
 end
-function comp_indices(avi::AVI, z, w; tol=1e-2)
+function comp_indices(avi::AVI, z, w; tol=1e-4)
     r = avi.M*z+avi.N*w+avi.o
     comp_indices(avi, r, z, w; tol)
 end
@@ -597,7 +547,7 @@ J[10] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ = 0 } (WEAK)
 J[11] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ < 0 }
 J[12] = {i+d1 : l2ᵢ = s2ᵢ = u2ᵢ, r2ᵢ free}
 """
-function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-2)
+function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-4)
     d1 = length(gavi.o)
     d2 = length(gavi.l2)
     @assert length(z) == d1+d2
