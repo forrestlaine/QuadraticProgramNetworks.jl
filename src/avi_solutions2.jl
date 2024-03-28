@@ -513,7 +513,7 @@ J[5] = {i :      zᵢ = uᵢ, rᵢ < 0 }
 J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ free}
 """
 #function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
-function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}(); tol=1e-3)
+function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}(); tol=1e-2)
     equal_bounds = isapprox.(l, u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
     d = size(M,2) + size(N,2)
@@ -573,7 +573,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
     #sum(length.(values(J))) < length(z) && throw(error("Z does not cleanly solve AVI"))
     return J
 end
-function comp_indices(avi::AVI, z, w; tol=1e-3)
+function comp_indices(avi::AVI, z, w; tol=1e-2)
     r = avi.M*z+avi.N*w+avi.o
     comp_indices(avi, r, z, w; tol)
 end
@@ -597,7 +597,7 @@ J[10] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ = 0 } (WEAK)
 J[11] = {i+d1 :       s2ᵢ = u2ᵢ, r2ᵢ < 0 }
 J[12] = {i+d1 : l2ᵢ = s2ᵢ = u2ᵢ, r2ᵢ free}
 """
-function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-3)
+function comp_indices(gavi::GAVI, z, w, permuted_request=Set{Linear}(); tol=1e-2)
     d1 = length(gavi.o)
     d2 = length(gavi.l2)
     @assert length(z) == d1+d2

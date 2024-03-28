@@ -164,8 +164,10 @@ function add_qp!(qp_net, cost, con_inds, private_vars...; tol=1e-8)
     catch err
         error("Detected non-quadratic cost!")
     end
-    q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
-    k = map(x->Float64(x.val), Symbolics.substitute(cost, Dict(v => 0.0 for v in qp_net.variables)))
+    q = map(x->Float64(Num(x).val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
+    k = map(x->Float64(Num(x).val), Symbolics.substitute(cost, Dict(v => 0.0 for v in qp_net.variables)))
+    #q = map(x->Float64(x.val), Symbolics.substitute(grad, Dict(v => 0.0 for v in qp_net.variables)))
+    #k = map(x->Float64(x.val), Symbolics.substitute(cost, Dict(v => 0.0 for v in qp_net.variables)))
     droptol!(Q, tol)
     f = Quadratic(Q, q, k)
     var_inds = mapreduce(vcat, private_vars; init = Int[]) do var

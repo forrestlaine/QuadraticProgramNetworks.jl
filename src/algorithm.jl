@@ -14,6 +14,9 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
         
         if level < num_levels(qpn)
             ret_low = solve(qpn, x, request, relaxable_inds; level=level+1, rng, proj_vectors)
+            if !ret_low.solved
+                return (; solved=false, x_fail=x, x_opt=nothing)
+            end
             @debug "Resuming iteration $iters at level $level"
             S = ret_low.Sol
             x = ret_low.x_opt
@@ -33,6 +36,9 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
         subpiece_ids = Dict(i=>1 for i in players_at_child_level)
         for (i,id) in enumerate(players_at_level)
             r = results[i]
+            if r.failed
+                return (; solved=false, x_fail=x, x_opt=nothing)
+            end
             if !r.solution
                 equilibrium = false
                 if level < num_levels(qpn)
@@ -47,7 +53,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                     end
                 end
             else
-                S[id] = results[i].S |> remove_subsets
+                S[id] = level > 2 ? results[i].S |> remove_subsets : results[i].S
                 if !isnothing(S[id]) && length(S[id]) == 0
                     @infiltrate
                 end

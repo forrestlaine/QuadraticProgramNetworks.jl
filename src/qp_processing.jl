@@ -158,18 +158,22 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         results = fetch.(subpiece_solgraphs)
         for r in results
             if !r.solution
-                return (; solution=false, r.e, r.subpiece_assignments)
+                return (; solution=false, r.e, failed=false, r.subpiece_assignments)
             end
         end
         if gen_solution_graphs
-            S_out = combine((r.solgraph for r in results), x; show_progress=false) |> collect |> PolyUnion
+            try
+                S_out = combine((r.solgraph for r in results), x; show_progress=true) |> collect |> PolyUnion
+            catch e
+                return (; solution = false, failed=true, S=nothing)
+            end
         else
             S_out = nothing
         end
     else
         ret = verify_solution(qp, base_constraints, dec_inds, x)
         if !ret.solution
-            return (; solution=false, ret.e, subpiece_assignments = Dict())
+            return (; solution=false, ret.e, failed=false, subpiece_assignments = Dict())
         else
             if gen_solution_graphs
                 S_out = process_solution_graph(qp, base_constraints, dec_inds, x, ret.λ; exploration_vertices) |> collect |> PolyUnion
@@ -181,7 +185,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
             end
         end
     end
-    return (; solution=true, S=S_out)
+    return (; solution=true, S=S_out, failed=false)
 end 
 
 function combine(solgraphs, x; show_progress=true)
@@ -220,7 +224,13 @@ function combine(regions, solutions, x; show_progress=true)
             it += 1
             PolyUnion([collect(s); rc.polys]) #|> remove_subsets
         end
-        @debug "Widths: $([length(c) for c in combined])"
+        widths = [length(c) for c in combined]
+
+        if length(widths) > 3 && sum(widths) > 20
+            @error("Too many solutions to combine. $widths")
+            error("Too many solutions to combine.")
+        end
+        @debug "Widths: $widths"
         #combined = [[collect(s); rc] for (s, rc) in zip(solutions, complements)]
         root = IntersectionRoot(combined, length.(complements), x; show_progress)
         root
