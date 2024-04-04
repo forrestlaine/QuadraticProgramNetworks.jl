@@ -6,7 +6,7 @@ function setup(::Val{:robust_avoid_simple}; T=1,
                  num_obj=1,
                  num_obj_faces=4,
                  obstacle_spacing = 1.0,
-                 exploration_vertices=10,
+                 exploration_vertices=0,
                  num_projections=5,
                  lane_heading = 0.0,
                  initial_speed=3.0,
@@ -27,26 +27,18 @@ function setup(::Val{:robust_avoid_simple}; T=1,
          0 0.]
     q = [-1.0, 0, 0, 0]
 
-    Aₑ = [1.0 1;
-          -1  1;
-          -1 -1;
-          1 -1]
-    bₑ = ones(4)
+    Ae = [1.0 1.1;
+          -1  1.1;
+          -1.2 -1;
+          1 -0.85]
+    be = ones(4)
 
-    a2 = [sqrt(3), 2]
-    a2 = a2 / norm(a2)
-    a3 = [-sqrt(3), 2]
-    a3 = a3 / norm(a3)
-
-    Aₒ = [0 -1.0;
-          a2'
-          a3']
-    bₒ = 0.3*ones(3)
-    Aₒ = [1.0 0;
-          -1 0;
-          0 1;
-          0 -1]
-    bₒ = [0.2,0.2,0.6,0.6]
+    bo = 0.3*ones(3)
+    Ao = [1.0 0.1;
+          -1 0.1;
+          0.2 1;
+          -0.1 -1]
+    bo = [0.2,0.2,0.6,0.6]
 
     x1 = QPN.variables(:x1, 1:4, 1:T)  
     x2 = QPN.variables(:x2, 1:4, 1:T)
@@ -60,6 +52,11 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     ϵ = QPN.variables(:ϵ, 1:T)
  
     qp_net = QPNet(x̄1,x̄2,x1,x2,u1,u2,s,ϵ)
+    qp_net.problem_data[:Ae] = Ae
+    qp_net.problem_data[:be] = be
+    qp_net.problem_data[:Ao] = Ao
+    qp_net.problem_data[:bo] = bo
+    qp_net.problem_data[:T] = T
    
     #####################################################################
     
@@ -72,7 +69,7 @@ function setup(::Val{:robust_avoid_simple}; T=1,
 
     for t = 1:T
         cost = ϵ[t]
-        cons = [Aₑ*(s[:,t]-x1[1:2,t]) + bₑ + ones(4)*ϵ[t]; Aₒ*(s[:,t]-x2[1:2,t]) + bₒ + ones(length(bₒ))*ϵ[t]]
+        cons = [Ae*(s[:,t]-x1[1:2,t]) + be + ones(4)*ϵ[t]; Ao*(s[:,t]-x2[1:2,t]) + bo + ones(length(bo))*ϵ[t]]
         lb = fill(0.0, length(cons))
         ub = fill(Inf, length(cons))
         con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
@@ -93,8 +90,8 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     end
     lb_dyn = fill(0.0, length(dynamic_cons))
     ub_dyn = fill(0.0, length(dynamic_cons))
-    lb_control = fill(-0.5, length(control_cons))
-    ub_control = fill(+0.5, length(control_cons))
+    lb_control = fill(-0.00, length(control_cons))
+    ub_control = fill(+0.00, length(control_cons))
     ad_con_id = QPN.add_constraint!(qp_net, [dynamic_cons; control_cons], [lb_dyn; lb_control], [ub_dyn; ub_control])
     cost = sum(ϵ[end])
     #cost = sum(x2[1:2,t]'*x2[1:2,t] for t in 1:T)
@@ -127,9 +124,9 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     
     QPN.add_edges!(qp_net, edge_list)
     QPN.assign_constraint_groups!(qp_net)
-    QPN.set_options!(qp_net; exploration_vertices=exploration_vertices, num_projections=num_projections, kwargs...)
+    QPN.set_options!(qp_net; exploration_vertices=exploration_vertices, num_projections=num_projections, visualization_function=(x->viz_solution(Ae,be,Ao,bo,x,T)), debug_visualize=true, kwargs...)
     
-    qp_net, Aₑ, bₑ, Aₒ, bₒ
+    qp_net
 end
 
 function get_verts(A,b,x)
@@ -142,8 +139,6 @@ function get_verts(A,b,x)
                 v = -M\m
                 if all(A*(v-x) + b .≥ -1e-4)
                     push!(V,v)
-                else
-                    @infiltrate
                 end
             catch err
             end
@@ -158,20 +153,20 @@ function get_verts(A,b,x)
     V[I]
 end
 
-function initialize(qpn, x0, T)
+function initialize(qpn, x0)
     θ = zeros(length(qpn.variables))
     θ[1:8] = x0
 
     x1prev = x0[1:4]
     x2prev = x0[5:8]
-    
+    T = qpn.problem_data[:T] 
     for t in 1:T
-        u1 = 0.01*[1,1.0]
+        u1 = [0.5,0]
         u2 = [0.0,0]
         x1prev = simple_dyn(x1prev, u1)
-        θ[8+(t-1)*4+1:8+4*t] = x1prev + 0.1*randn(4)
+        θ[8+(t-1)*4+1:8+4*t] = x1prev
         x2prev = simple_dyn(x2prev, u2)
-        θ[8+T*4+(t-1)*4+1:8+T*4+4*t] = x2prev + 0.1*randn(4)
+        θ[8+T*4+(t-1)*4+1:8+T*4+4*t] = x2prev
     end
     θ
 end
@@ -192,16 +187,19 @@ function viz_solution(Ae,be,Ao,bo,θ,T)
     xo = [[v[1] for v in Vo]; Vo[1][1]]
     yo = [[v[2] for v in Vo]; Vo[1][2]]
 
-    lines!(ax, xe, ye, color=:blue, linestyle=:dash)
-    lines!(ax, xo, yo, color=:red, linestyle=:dash)
+    lines!(ax, xe, ye, color=:blue)
+    lines!(ax, xo, yo, color=:red)
 
-    for t in 1:T
+    for t in T:T
         Xe = θ[8+(t-1)*4+1:8+(t-1)*4+4]
-        display("X ego: $Xe")
         Xo = θ[8+T*4+(t-1)*4+1:8+T*4+(t-1)*4+4]
-        display("X other: $Xo")
+        ϵ = θ[end-T+t]
+
         Ve = get_verts(Ae,be,Xe[1:2])
         Vo = get_verts(Ao,bo,Xo[1:2])
+        
+        Ve_i = get_verts(Ae,be.+ϵ,Xe[1:2])
+        Vo_i = get_verts(Ao,bo.+ϵ,Xo[1:2])
 
         xe = [[v[1] for v in Ve]; Ve[1][1]]
         ye = [[v[2] for v in Ve]; Ve[1][2]]
@@ -209,6 +207,13 @@ function viz_solution(Ae,be,Ao,bo,θ,T)
         yo = [[v[2] for v in Vo]; Vo[1][2]]
         lines!(ax, xe, ye, color=:blue, linewidth=t)
         lines!(ax, xo, yo, color=:red, linewidth=t)
+        
+        xe_i = [[v[1] for v in Ve_i]; Ve_i[1][1]]
+        ye_i = [[v[2] for v in Ve_i]; Ve_i[1][2]]
+        xo_i = [[v[1] for v in Vo_i]; Vo_i[1][1]]
+        yo_i = [[v[2] for v in Vo_i]; Vo_i[1][2]]
+        lines!(ax, xe_i, ye_i, color=:blue, linewidth=t, linestyle=:dash)
+        lines!(ax, xo_i, yo_i, color=:red, linewidth=t, linestyle=:dash)
     end
     display(f)
 end

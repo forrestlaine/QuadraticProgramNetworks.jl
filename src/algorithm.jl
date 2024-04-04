@@ -5,6 +5,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
         rng=MersenneTwister())
 
     x = copy(x_init)
+    level == 1 && qpn.options.debug_visualize && qpn.options.visualization_function(x)
     if level == 1 && isempty(proj_vectors)
         foreach(i->push!(proj_vectors, randn(rng, length(x))), 1:qpn.options.num_projections)
     end
@@ -53,7 +54,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                     end
                 end
             else
-                S[id] = level > 2 ? results[i].S |> remove_subsets : results[i].S
+                S[id] = level ∈ qpn.options.levels_to_remove_subsets ? results[i].S |> remove_subsets : results[i].S
                 if !isnothing(S[id]) && length(S[id]) == 0
                     @infiltrate
                 end
@@ -61,12 +62,16 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             end
         end
         if !equilibrium
+            @debug "Equilibium not satisfied at level $level, attempting to find one using the following subpiece assignment:"
+            @debug "$(subpiece_ids)"
             try
                 xnew = solve_qep(qpn, players_at_level, x, subpiece_assignments)
                 if norm(xnew-x) < 1e-3
                     @infiltrate
                 end
                 x = xnew
+                @debug "Equilibrium found, updating solution estimate."
+                qpn.options.debug_visualize && qpn.options.visualization_function(x)
             catch e
                 @infiltrate
                 @debug "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."

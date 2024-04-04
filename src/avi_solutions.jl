@@ -251,6 +251,7 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
     reducible_inds = []
     (; piece, reduced_inds) = local_piece(gavi,n,m,K,level,subpiece_index; reducible_inds)
     if isempty(piece)
+        @infiltrate
         throw(error("Piece is empty"))
     end
     

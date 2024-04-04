@@ -512,8 +512,13 @@ function project(p::Poly, keep_dims; tol=1e-6)
     projected_rays::Vector{Polyhedra.Ray{Float64, Vector{Float64}}} = map(ray->Pmat*ray, Polyhedra.rays(vr))
     projected_lines::Vector{Polyhedra.Line{Float64, Vector{Float64}}} = map(line->Pmat*line, Polyhedra.lines(vr))
 
-    proj_vr = vrep(projected_points, projected_lines, projected_rays)
-    projected = vrep_to_poly(proj_vr)
+    local projected
+    try
+        proj_vr = vrep(projected_points, projected_lines, projected_rays)
+        projected = vrep_to_poly(proj_vr)
+    catch e
+        @infiltrate
+    end
     ProjectedPoly(projected, p)
 end
 
@@ -542,11 +547,7 @@ function poly_slice(poly::IntersectionPoly, x::Vector{Union{Float64, Missing}})
     IntersectionPoly([poly_slice(p, x) for p in poly.polys])
 end
 
-function exemplar(poly::Poly; tol=1e-4, debug=false)
-
-
-
-
+function exemplar_old(poly::Poly; tol=1e-4, debug=false)
     m = OSQP.Model()
     n = length(poly)
     n == 0 && return (; empty=false, example=nothing)
@@ -554,7 +555,7 @@ function exemplar(poly::Poly; tol=1e-4, debug=false)
     d = size(A,2)
     (; open_low, open_hi) = open_bounds(l,u,rl,ru)
 
-    if isapprox(l, u; atol=tol, rtol=tol) && sum(open_low) == 0 && sum(open_hi) == 0
+    if isapprox(l, u; atol=tol, rtol=tol) && sum(open_low) == 0 && sum(open_hi) == 0 && size(A,1) == size(A,2)
         x = A\l 
         if isapprox(A*x, l; atol=tol, rtol=tol)
             return (; empty=false, example=x)
@@ -584,6 +585,59 @@ function exemplar(poly::Poly; tol=1e-4, debug=false)
     t = -res.info.obj_val
     empty = abs(res.info.status_val) == 3 || t < tol
     example = empty ? nothing : res.x[1:end-1]
+    (; empty, example)
+end
+
+function exemplar(poly::Poly; tol=1e-2, debug=false)
+    m = OSQP.Model()
+    n = length(poly)
+    n == 0 && return (; empty=false, example=nothing)
+    (; A,l,u,rl,ru) = vectorize(poly)
+    d = size(A,2)
+    (; open_low, open_hi) = open_bounds(l,u,rl,ru)
+
+    if isapprox(l, u; atol=tol, rtol=tol) && sum(open_low) == 0 && sum(open_hi) == 0 && size(A,1) == size(A,2)
+        x = A\l 
+        if isapprox(A*x, l; atol=tol, rtol=tol)
+            return (; empty=false, example=x)
+        else
+            return (; empty=true, example=nothing)
+        end
+    end
+
+    AA = [[A; -A] ones(2n)]
+    ll = [l; -u]
+    
+    OSQP.setup!(m;
+                q=[zeros(d); 1.0],
+                A=sparse(AA),
+                l=ll,
+                verbose=false,
+                polish=true,
+                eps_abs=1e-8,
+                eps_rel=1e-8)
+    res = OSQP.solve!(m)
+    @infiltrate debug
+    x = res.x[1:end-1]
+    ϵ = res.x[end]
+
+    if ϵ > tol
+        empty = true
+        example = nothing
+    elseif ϵ > -tol
+        active_l = abs.(res.y[1:n]) .> tol
+        active_u = abs.(res.y[n+1:2n]) .> tol
+        if any(active_l .&& open_low) || any(active_u .&& open_hi)
+            empty = true
+            example = nothing
+        else
+            empty = false
+            example = x
+        end
+    else
+        empty = false
+        example = x
+    end
     (; empty, example)
 end
 

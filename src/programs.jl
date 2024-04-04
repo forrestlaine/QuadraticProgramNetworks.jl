@@ -50,6 +50,9 @@ struct QEP
     constraints::Dict{Int, Constraint}
 end
 
+struct NaturalNumbers <: AbstractSet{Int} end
+Base.in(x::Int, S::NaturalNumbers) = x > 0
+
 @enum SharedVariableMode begin
     MIN_NORM = 1
     SHARED_DUAL = 2
@@ -65,8 +68,10 @@ Base.@kwdef mutable struct QPNetOptions
     make_requests::Bool=false
     exploration_vertices::Int=0
     try_hull::Bool=false
-    debug::Bool=false
+    visualization_function::Function=(x->nothing)
+    debug_visualize::Bool=false
     gen_solution_map::Bool=true
+    levels_to_remove_subsets::AbstractSet{Int}=NaturalNumbers()
 end
 
 struct QPNet
@@ -78,6 +83,7 @@ struct QPNet
     options::QPNetOptions
     variables::Vector{Num}
     var_indices::Dict{Num, Int}
+    problem_data::Dict # holds problem data for auxiliary functions
 end
     
 function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
@@ -96,8 +102,9 @@ function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
     network_edges =  Dict{Int, Set{Int}}()
     reachable_nodes =  Dict{Int, Set{Int}}()
     network_depth_map =  Dict{Int, Set{Int}}()
+    problem_data = Dict{Any, Any}()
     options = QPNetOptions()
-    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds)    
+    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds, problem_data)    
 end
 
 function flatten(qpn::QPNet)
