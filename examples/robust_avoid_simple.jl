@@ -167,11 +167,12 @@ function initialize(qpn, x0, T)
     
     for t in 1:T
         u1 = 0.01*[1,1.0]
+        u1 = [0.0,0]
         u2 = [0.0,0]
         x1prev = simple_dyn(x1prev, u1)
-        θ[8+(t-1)*4+1:8+4*t] = x1prev + 0.1*randn(4)
+        θ[8+(t-1)*4+1:8+4*t] = x1prev + 0*randn(4)
         x2prev = simple_dyn(x2prev, u2)
-        θ[8+T*4+(t-1)*4+1:8+T*4+4*t] = x2prev + 0.1*randn(4)
+        θ[8+T*4+(t-1)*4+1:8+T*4+4*t] = x2prev + 0*randn(4)
     end
     θ
 end
