@@ -70,7 +70,7 @@ Base.@kwdef mutable struct QPNetOptions
     try_hull::Bool=false
     visualization_function::Function=(x->nothing)
     debug_visualize::Bool=false
-    gen_solution_map::Bool=true
+    gen_solution_map::Bool=false
     levels_to_remove_subsets::AbstractSet{Int}=NaturalNumbers()
 end
 

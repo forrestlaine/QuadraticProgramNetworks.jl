@@ -1,12 +1,13 @@
 function simple_dyn(x, u)
-    x + [x[3:4]; u]
+    #x + [x[3:4]; u]
+    x + [u; u]
 end
 
 function setup(::Val{:robust_avoid_simple}; T=1,
                  num_obj=1,
                  num_obj_faces=4,
                  obstacle_spacing = 1.0,
-                 exploration_vertices=0,
+                 exploration_vertices=10,
                  num_projections=5,
                  lane_heading = 0.0,
                  initial_speed=3.0,
@@ -20,7 +21,7 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     # Obj poly: x2ₜ[1:2] + { z : Aₒz + bₒ ≥ 0 }
     
     Q = [0.0 0 0 0 ;
-         0 0 0 0;
+         0 0.001 0 0;
          0 0 0 0;
          0 0 0 0]
     R = [0. 0;
@@ -90,8 +91,8 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     end
     lb_dyn = fill(0.0, length(dynamic_cons))
     ub_dyn = fill(0.0, length(dynamic_cons))
-    lb_control = fill(-0.00, length(control_cons))
-    ub_control = fill(+0.00, length(control_cons))
+    lb_control = fill(-1.0, length(control_cons))
+    ub_control = fill(+1.0, length(control_cons))
     ad_con_id = QPN.add_constraint!(qp_net, [dynamic_cons; control_cons], [lb_dyn; lb_control], [ub_dyn; ub_control])
     cost = sum(ϵ[end])
     #cost = sum(x2[1:2,t]'*x2[1:2,t] for t in 1:T)
@@ -110,8 +111,8 @@ function setup(::Val{:robust_avoid_simple}; T=1,
     end
     lb_dyn = fill(0.0, length(dynamic_cons))
     ub_dyn = fill(0.0, length(dynamic_cons))
-    lb_control = fill(-1.0, length(control_cons))
-    ub_control = fill(+1.0, length(control_cons))
+    lb_control = fill(-10.0, length(control_cons))
+    ub_control = fill(+10.0, length(control_cons))
     ego_con_id = QPN.add_constraint!(qp_net, [dynamic_cons; control_cons], [lb_dyn; lb_control], [ub_dyn; ub_control])
     avoid_con_id = QPN.add_constraint!(qp_net, ϵ, zeros(T), fill(Inf, T))
     cost = sum(0.5*x1[:,t]'*Q*x1[:,t] + x1[:,t]'*q + 0.5*u1[:,t]'R*u1[:,t] for t in 1:T)

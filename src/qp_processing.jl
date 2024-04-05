@@ -118,7 +118,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
     dec_inds = decision_inds(qpn, id)
 
     Solgraphs_out = Dict()
-    gen_solution_graphs = !(id in qpn.network_depth_map[1])
+    gen_solution_graphs = !(id in qpn.network_depth_map[1]) || qpn.options.gen_solution_map
 
     child_inds = qpn.network_edges[id] |> collect
     if length(child_inds) > 0

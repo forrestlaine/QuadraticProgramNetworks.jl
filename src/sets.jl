@@ -644,7 +644,12 @@ end
 """
 Return true if polyhedron is empty.
 """
-function Base.isempty(poly::Poly; tol=1e-4, debug=false)
+function Base.isempty(poly::Poly; tol=1e-4, debug=false, x=nothing)
+    if !isnothing(x)
+        if x ∈ poly
+            return false
+        end
+    end
     (; empty) = exemplar(poly; tol, debug)
     return empty
 end
