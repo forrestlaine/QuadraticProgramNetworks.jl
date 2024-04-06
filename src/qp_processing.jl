@@ -118,7 +118,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
     dec_inds = decision_inds(qpn, id)
 
     Solgraphs_out = Dict()
-    gen_solution_graphs = !(id in qpn.network_depth_map[1])
+    gen_solution_graphs = !(id in qpn.network_depth_map[1]) || qpn.options.gen_solution_map
 
     child_inds = qpn.network_edges[id] |> collect
     if length(child_inds) > 0
@@ -145,7 +145,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
                     if gen_solution_graphs
                         solgraph_generator = process_solution_graph(qp, appended_constraints, dec_inds, x, ret.λ; exploration_vertices)
                         high_dim = length(solgraph_generator.z) + length(solgraph_generator.w)
-                        @debug "There are $(length(solgraph_generator.unexplored_Ks)) nodes to expand, excluding additional vertex exploration. Projecting from $high_dim to $(length(x)) dimensions."
+                        @debug "There are $(length(solgraph_generator.unexplored_Ks)) nodes to expand, excluding additional vertex exploration. Projecting from $high_dim to $(length(x)) dimensions. Exploration vertices is $exploration_vertices"
                         solgraph = (children_solgraph_polys, remove_subsets(PolyUnion(collect(solgraph_generator))))
                         solgraph
                     else
@@ -158,9 +158,11 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         results = fetch.(subpiece_solgraphs)
         for r in results
             if !r.solution
+                @debug "When using one of the subpieces, the current point is not a solution for QP $id."
                 return (; solution=false, r.e, failed=false, r.subpiece_assignments)
             end
         end
+        @debug "The current point is optimal for QP $id using each of the subpieces. Solgraphs have been found for each subpiece. Going to now combine them."
         if gen_solution_graphs
             try
                 S_out = combine((r.solgraph for r in results), x; show_progress=true) |> collect |> PolyUnion
