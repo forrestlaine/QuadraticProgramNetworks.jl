@@ -26,7 +26,31 @@ function setup(::Val{:simple_bilevel}; kwargs...)
 
     QPN.add_edges!(qp_net, edge_list)
     QPN.assign_constraint_groups!(qp_net)
-    QPN.set_options!(qp_net; kwargs...)
+    QPN.set_options!(qp_net; debug_visualize=true, kwargs...)
+    
+    qp_net.visualization_function=visualize_simple_bilevel
+
     qp_net
 end
+
+
+function visualize_simple_bilevel(θ)
+    f = Figure()
+    ax = Axis(f[1,1], aspect = DataAspect(), limits = (-4, 4, -3, 5))
+
+    w = θ[1:2]
+    x = θ[3]
+    y = θ[4]
+
+    lines!(ax, [-5,0.0], [0.0, 0], color=:black, linewidth=4)
+    lines!(ax, [0.0, 5.0], [0.0, 5.0], color=:black, linewidth=4)
+    
+    scatter!(ax, w[1],w[2], color=:green, markersize=25)
+    scatter!(ax, x,y, color=:blue, markersize=25)
+    name = string(floor(Int, time()*1e3))[end-4:end] * ".png"
+    save(name, f)
+    display(f)
+end
+
+
 

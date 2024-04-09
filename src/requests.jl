@@ -1,3 +1,8 @@
+function solve(qpn::QPNet)
+    solve(qpn, qpn.default_initialization)
+end
+
+
 """
 Request logic:
 

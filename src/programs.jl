@@ -68,13 +68,12 @@ Base.@kwdef mutable struct QPNetOptions
     make_requests::Bool=false
     exploration_vertices::Int=0
     try_hull::Bool=false
-    visualization_function::Function=(x->nothing)
     debug_visualize::Bool=false
     gen_solution_map::Bool=false
     levels_to_remove_subsets::AbstractSet{Int}=NaturalNumbers()
 end
 
-struct QPNet
+mutable struct QPNet
     qps::Dict{Int, QP}
     constraints::Dict{Int, Constraint}
     network_edges::Dict{Int, Set{Int}}
@@ -84,6 +83,8 @@ struct QPNet
     variables::Vector{Num}
     var_indices::Dict{Num, Int}
     problem_data::Dict # holds problem data for auxiliary functions
+    visualization_function::Function
+    default_initialization::Vector{Float64}
 end
     
 function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
@@ -102,9 +103,11 @@ function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
     network_edges =  Dict{Int, Set{Int}}()
     reachable_nodes =  Dict{Int, Set{Int}}()
     network_depth_map =  Dict{Int, Set{Int}}()
-    problem_data = Dict{Any, Any}()
     options = QPNetOptions()
-    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds, problem_data)    
+    problem_data = Dict{Any, Any}()
+    visualization_function = (x -> nothing)
+    default_initialization = zeros(ind)
+    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds, problem_data, visualization_function, default_initialization)
 end
 
 function flatten(qpn::QPNet)

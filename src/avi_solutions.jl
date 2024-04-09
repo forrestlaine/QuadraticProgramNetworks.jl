@@ -250,9 +250,8 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
     nv = length(decision_inds)
     reducible_inds = []
     (; piece, reduced_inds) = local_piece(gavi,n,m,K,level,subpiece_index; reducible_inds)
-    if isempty(piece; x=[z;w])
-        @infiltrate
-        throw(error("Piece is empty"))
+    if isempty(piece; x=[z;w], tol=1e-4)
+        return (; piece=nothing, vertices=nothing, success=false)
     end
     
     if [z;w] ∈ piece
@@ -263,7 +262,7 @@ function expand(gavi,z,w,K,level,subpiece_index,decision_inds,param_inds; high_d
         vertices = [] 
     end
     piece = project_and_permute(piece, decision_inds, param_inds)
-    (; piece, vertices)
+    (; piece, vertices, success=true)
 end
 
 function permute_eval(guide, v, decision_inds, param_inds)
@@ -301,17 +300,18 @@ end
 function expand_recipes!(gavi_sols::LocalGAVISolutions)
     if !isempty(gavi_sols.unexplored_Ks)
         expansions = map(collect(gavi_sols.unexplored_Ks)) do K
-            Threads.@spawn expand(gavi_sols.gavi, 
-                                  gavi_sols.z, 
-                                  gavi_sols.w, 
-                                  K, 
-                                  gavi_sols.level, 
-                                  gavi_sols.subpiece_index, 
-                                  gavi_sols.decision_inds, 
-                                  gavi_sols.param_inds)
+            expand(gavi_sols.gavi, 
+                   gavi_sols.z, 
+                   gavi_sols.w, 
+                   K, 
+                   gavi_sols.level, 
+                   gavi_sols.subpiece_index, 
+                   gavi_sols.decision_inds, 
+                   gavi_sols.param_inds)
         end
         results = fetch.(expansions)
         for r in results
+            r.success || continue
             push!(gavi_sols.polys, r.piece)
             for v in r.vertices
                 vert = QuantizedVector(v=v)
