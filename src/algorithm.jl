@@ -28,7 +28,6 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
         players_at_level = qpn.network_depth_map[level] |> collect |> sort
         players_at_child_level = union((qpn.network_edges[i] for i in players_at_level)...) |> collect |> sort
         processing_tasks = map(players_at_level) do id
-            #Threads.@spawn process_qp(qpn, id, x, S)
             process_qp(qpn, id, x, S; exploration_vertices=qpn.options.exploration_vertices)
         end
         results = fetch.(processing_tasks)
@@ -68,6 +67,8 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 xnew = solve_qep(qpn, players_at_level, x, subpiece_assignments)
                 if norm(xnew-x) < 1e-3
                     @infiltrate
+                    solve_qep(qpn, players_at_level, x, subpiece_assignments; debug=true)
+                    #@infiltrate
                 end
                 x = xnew
                 @debug "Equilibrium found, updating solution estimate."

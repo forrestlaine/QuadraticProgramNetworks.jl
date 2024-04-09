@@ -25,6 +25,7 @@ function solve_qp(Q, q, A, l, u; tol=1e-8, debug=false, solver=:OSQP)
                                                    cumulative_iteration_limit=100000,
                                                    restart_limits=5,
                                                    lemke_rank_deficiency_iterations=1000)
+        @infiltrate debug
         if path_status != PATHSolver.MCP_Solved
             error("Solver failure. Status value is $(path_status)")
         else
@@ -35,7 +36,7 @@ function solve_qp(Q, q, A, l, u; tol=1e-8, debug=false, solver=:OSQP)
     end
 end
 
-function check_qp_convexity(Q, A, l, u, dec_inds; tol=1e-6, debug=false)
+function check_qp_convexity(Q, A, l, u, dec_inds, id; tol=1e-6, debug=false)
     p = Poly(A, l, u)
     (; implicitly_equality, vals) = implicit_bounds(p; tol, debug)
     Ae = collect(A[implicitly_equality,dec_inds])
@@ -43,13 +44,15 @@ function check_qp_convexity(Q, A, l, u, dec_inds; tol=1e-6, debug=false)
     V = F.V
     r = rank(Diagonal(F.S))
     Z = V[:,r+1:end]
-    @infiltrate
     QQ = collect(Z'*Q[dec_inds, dec_inds]*Z)
     E = eigen(QQ)
-    @assert all(E.values .> -tol)
+    convex = all(E.values .> -tol) 
+    if !convex
+        error("QP $id is not convex. Exiting.")
+    end
 end
 
-function verify_solution(qp, constraints, dec_inds, x, check_convexity; tol=1e-6)
+function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=1e-4, debug=false)
     Q = qp.f.Q[dec_inds,:]
     q = qp.f.q[dec_inds]
     q̃ = Q*x + q
@@ -61,23 +64,31 @@ function verify_solution(qp, constraints, dec_inds, x, check_convexity; tol=1e-6
     end |> (x -> vcat.(x...))
     m = size(A,1)
 
-    check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds)
+    check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds, id)
     
     ax = A*x 
 
-    feasible = all(ax .> l.-tol) && all(ax .< u.+tol)
+    feasible = all(in(x, P; tol=1e-3) for P in constraints)
+    #feasible = all(ax .> l.-tol) && all(ax .< u.+tol)
     if !feasible
-        return (; solution=false, λ = nothing, e="Current point is infeasible when using tolerance $tol.")
+        return (; solution=false, λ = nothing, e="Current point is infeasible when using tolerance $tol.", debug_data=nothing)
     else
         if m == 0
             if isapprox(q̃, zero(q̃); atol=tol)
-                return (; solution=true, λ=zeros(0))
+                return (; solution=true, λ=zeros(0), debug_data=nothing)
             else
-                return (; solution=false, λ=nothing, e="Current point is suboptimal")
+                return (; solution=false, λ=nothing, e="Current point is suboptimal", debug_data=nothing)
             end
         else
-            pos_inds = ax .< l .+ tol
-            neg_inds = ax .> u .- tol
+            pos_inds = ax .< l .+ 1e-3
+            neg_inds = ax .> u .- 1e-3
+
+            pos_inds2 = ax .< l .+ 1e-1
+            neg_inds2 = ax .> u .- 1e-1
+
+            @infiltrate pos_inds ≠ pos_inds2
+            @infiltrate neg_inds ≠ neg_inds2
+
             both_inds = pos_inds .&& neg_inds
             pos_inds = pos_inds .&& .!both_inds
             neg_inds = neg_inds .&& .!both_inds
@@ -116,12 +127,12 @@ function verify_solution(qp, constraints, dec_inds, x, check_convexity; tol=1e-6
                 try
                     λ = solve_qp(Ad*Ad', -Ad*q̃, sparse(I, m, m), lb, ub; solver=:PATH)
                     if isapprox(Ad'*λ, q̃; atol=1e-4, rtol=1e-4)
-                        return (; solution=true, λ)
+                        return (; solution=true, λ, debug_data=nothing)
                     else
-                        return (; solution=false, λ=nothing, e="Current point is suboptimal (via QP)")
+                        return (; solution=false, λ, e="Current point is suboptimal (via QP).", debug_data=(; Ad, q̃, λ))
                     end
                 catch ee
-                    return (; solution=false, λ=nothing, e="Solving for duals failed. $ee")
+                    return (; solution=false, λ=nothing, e="Solving for duals failed. $ee", debug_data=nothing)
                 end
             end
         end
@@ -147,7 +158,8 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         end
         
         all_subpiece_indices = collect(Iterators.product(cardinalities...))
-        @debug "Creating subpiece solgraphs in the processing of node $id. Number of combinations of subpieces to investigate: $(length(all_subpiece_indices))."
+        @debug "Creating subpiece solgraphs in the processing of node $id. 
+                Number of combinations of subpieces to investigate: $(length(all_subpiece_indices))."
         subpiece_solgraphs = map(all_subpiece_indices) do child_subpiece_indices
             let child_inds=child_inds, 
                 child_subpiece_indices=child_subpiece_indices, 
@@ -163,15 +175,16 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
                     P = S[j][ji]
                 end
                 appended_constraints = [base_constraints; children_solgraph_polys]
-                ret = verify_solution(qp, appended_constraints, dec_inds, x, check_convexity)
+                ret = verify_solution(qp, id, appended_constraints, dec_inds, x, check_convexity)
                 if !ret.solution
                     subpiece_assignments = Dict(j=>ji for (j,ji) in zip(child_inds, child_subpiece_indices))
-                    (; solution=false, e=ret.e, subpiece_assignments)
+                    (; solution=false, e=ret.e, subpiece_assignments, ret.debug_data)
                 else
                     if gen_solution_graphs
                         solgraph_generator = process_solution_graph(qp, appended_constraints, dec_inds, x, ret.λ; exploration_vertices)
                         high_dim = length(solgraph_generator.z) + length(solgraph_generator.w)
-                        @debug "There are $(length(solgraph_generator.unexplored_Ks)) nodes to expand, excluding additional vertex exploration. Projecting from $high_dim to $(length(x)) dimensions. Exploration vertices is $exploration_vertices"
+                        @debug "There are $(length(solgraph_generator.unexplored_Ks)) nodes to expand, excluding additional vertex exploration. 
+                                Projecting from $high_dim to $(length(x)) dimensions. Exploration vertices is $exploration_vertices"
                         solgraph = (children_solgraph_polys, remove_subsets(PolyUnion(collect(solgraph_generator))))
                         solgraph
                     else
@@ -185,10 +198,12 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         for r in results
             if !r.solution
                 @debug "When using one of the subpieces, the current point is not a solution for QP $id."
-                return (; solution=false, r.e, failed=false, r.subpiece_assignments)
+                @debug r.e
+                return (; solution=false, r.e, failed=false, r.subpiece_assignments, r.debug_data)
             end
         end
-        @debug "The current point is optimal for QP $id using each of the subpieces. Solgraphs have been found for each subpiece. Going to now combine them."
+        @debug "The current point is optimal for QP $id using each of the subpieces. 
+                Solgraphs have been found for each subpiece. Going to now combine them."
         if gen_solution_graphs
             try
                 S_out = combine((r.solgraph for r in results), x; show_progress=true) |> collect |> PolyUnion
@@ -199,7 +214,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
             S_out = nothing
         end
     else
-        ret = verify_solution(qp, base_constraints, dec_inds, x, check_convexity)
+        ret = verify_solution(qp, id, base_constraints, dec_inds, x, check_convexity)
         if !ret.solution
             return (; solution=false, ret.e, failed=false, subpiece_assignments = Dict())
         else

@@ -409,6 +409,8 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     # require reducing dimension AFTER psi minimization
     (; z, status, info) = solve_gavi(gavi, z0, w)
 
+    @infiltrate debug
+
     if status != SUCCESS
         @infiltrate
         error("AVI solve error. $(info)")
