@@ -40,6 +40,7 @@ include("../examples/robust_avoid.jl")
 include("../examples/robust_avoid_simple.jl")
 include("../examples/four_player_matrix_game.jl")
 include("../examples/rock_paper_scissors.jl")
+include("../examples/chainstore.jl")
 
 export Poly, QP, Constraint, Quadratic, QPNet, solve, setup
 
