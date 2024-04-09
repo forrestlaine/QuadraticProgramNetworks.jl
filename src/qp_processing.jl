@@ -35,7 +35,21 @@ function solve_qp(Q, q, A, l, u; tol=1e-8, debug=false, solver=:OSQP)
     end
 end
 
-function verify_solution(qp, constraints, dec_inds, x; tol=1e-6)
+function check_qp_convexity(Q, A, l, u, dec_inds; tol=1e-6, debug=false)
+    p = Poly(A, l, u)
+    (; implicitly_equality, vals) = implicit_bounds(p; tol, debug)
+    Ae = collect(A[implicitly_equality,dec_inds])
+    F = svd(Ae; full=true)
+    V = F.V
+    r = rank(Diagonal(F.S))
+    Z = V[:,r+1:end]
+    @infiltrate
+    QQ = collect(Z'*Q[dec_inds, dec_inds]*Z)
+    E = eigen(QQ)
+    @assert all(E.values .> -tol)
+end
+
+function verify_solution(qp, constraints, dec_inds, x, check_convexity; tol=1e-6)
     Q = qp.f.Q[dec_inds,:]
     q = qp.f.q[dec_inds]
     q̃ = Q*x + q
@@ -46,6 +60,8 @@ function verify_solution(qp, constraints, dec_inds, x; tol=1e-6)
         A, l, u
     end |> (x -> vcat.(x...))
     m = size(A,1)
+
+    check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds)
     
     ax = A*x 
 
@@ -116,6 +132,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
     qp = qpn.qps[id]
     base_constraints = [qpn.constraints[c].poly for c in qp.constraint_indices]
     dec_inds = decision_inds(qpn, id)
+    check_convexity = qpn.options.check_convexity
 
     Solgraphs_out = Dict()
     gen_solution_graphs = !(id in qpn.network_depth_map[1]) || qpn.options.gen_solution_map
@@ -132,12 +149,21 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
         all_subpiece_indices = collect(Iterators.product(cardinalities...))
         @debug "Creating subpiece solgraphs in the processing of node $id. Number of combinations of subpieces to investigate: $(length(all_subpiece_indices))."
         subpiece_solgraphs = map(all_subpiece_indices) do child_subpiece_indices
-            let child_inds=child_inds, child_subpiece_indices=child_subpiece_indices, S=S, base_constraints=base_constraints, qp=qp, dec_inds=dec_inds, x=x, exploration_vertices=exploration_vertices
+            let child_inds=child_inds, 
+                child_subpiece_indices=child_subpiece_indices, 
+                S=S, 
+                base_constraints=base_constraints, 
+                qp=qp, 
+                dec_inds=dec_inds, 
+                x=x, 
+                exploration_vertices=exploration_vertices, 
+                check_convexity=check_convexity
+
                 children_solgraph_polys = map(child_inds, child_subpiece_indices) do j,ji
                     P = S[j][ji]
                 end
                 appended_constraints = [base_constraints; children_solgraph_polys]
-                ret = verify_solution(qp, appended_constraints, dec_inds, x)
+                ret = verify_solution(qp, appended_constraints, dec_inds, x, check_convexity)
                 if !ret.solution
                     subpiece_assignments = Dict(j=>ji for (j,ji) in zip(child_inds, child_subpiece_indices))
                     (; solution=false, e=ret.e, subpiece_assignments)
@@ -173,7 +199,7 @@ function process_qp(qpn::QPNet, id::Int, x, S; exploration_vertices=0)
             S_out = nothing
         end
     else
-        ret = verify_solution(qp, base_constraints, dec_inds, x)
+        ret = verify_solution(qp, base_constraints, dec_inds, x, check_convexity)
         if !ret.solution
             return (; solution=false, ret.e, failed=false, subpiece_assignments = Dict())
         else

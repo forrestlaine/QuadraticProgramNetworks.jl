@@ -722,7 +722,7 @@ function intrinsic_dim(p::Poly; tol=1e-4, debug=false)
     catch e
         return 0 # TODO this is a hack... assuming that primal inf check only fails if intrinsic dim is 0... probably not the case
     end
-    (; A,l,u,rl,ru) = vectorize(p)
+    (; A) = vectorize(p)
     Aim = A[implicitly_equality,:]
     @infiltrate debug
     intrinsic_dim = embedded_dim(p) - rank(Aim)

@@ -43,5 +43,6 @@ function setup(::Val{:chainstore}; num_towns=10, α=1.0, exploration_vertices=10
     QPN.add_edges!(qp_net, edge_list)
     QPN.assign_constraint_groups!(qp_net)
     QPN.set_options!(qp_net; exploration_vertices=exploration_vertices, debug_visualize=false)
+    qp_net.default_initialization = fill(0.5, 4*num_towns)
     qp_net
 end
