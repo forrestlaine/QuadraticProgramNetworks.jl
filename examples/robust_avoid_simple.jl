@@ -1,5 +1,5 @@
 function setup(::Val{:robust_avoid_simple};
-                 num_obj=1,
+                 num_obj=2,
                  num_poly_faces=5,
                  exploration_vertices=10,
                  max_ego_delta=15.0,
@@ -160,7 +160,6 @@ function viz_solution_robust_avoid_simple(Ae,be,Ao,bo,θ)
         lines!(ax, xo, yo, color=colors[i], linestyle=:dash, linewidth=2)
     end
     name = string(floor(Int, time()*1e3))[end-4:end] * ".png"
-    save(name, f)
     display(f)
     f
 end

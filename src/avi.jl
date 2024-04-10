@@ -60,11 +60,11 @@ Find z, u, v, s.t.:
     v ≥ 0 ⟂ u - z ≥ 0
 Currently uses PATHSolver
 """
-function solve_avi(avi::AVI, z0, w)
+function solve_avi(avi::AVI, z0, w; convergence_tolerance=1e-10)
     PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
                                                    silent=true, 
-                                                   convergence_tolerance=1e-8, 
+                                                   convergence_tolerance=convergence_tolerance,
                                                    cumulative_iteration_limit=200000,
                                                    major_iteration_limit=1000,
                                                    restart_limits=5,
@@ -99,14 +99,14 @@ function find_closest_feasible!(gavi, z0, w)
     end
 end
 
-function solve_gavi(gavi::GAVI, z0, w; presolve=true)
+function solve_gavi(gavi::GAVI, z0, w; presolve=true, convergence_tolerance=1e-10)
     presolve && find_closest_feasible!(gavi, z0, w)
     avi = convert(gavi)
     d1 = length(gavi.l1)
     d2 = length(gavi.l2)
     s = gavi.A*z0+gavi.B*w
     z0s = copy([z0; s])
-    (; z, status, info) = solve_avi(avi, z0s, w)
+    (; z, status, info) = solve_avi(avi, z0s, w; convergence_tolerance)
     zg = z[1:d1+d2]
     (; z=zg, status, info)
 end

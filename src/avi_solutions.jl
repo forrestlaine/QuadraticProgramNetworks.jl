@@ -168,11 +168,6 @@ function get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, p
                     polish=true)
         res = OSQP.solve!(modl)
         if res.info.status_val ∈ (1,2)
-            #if res.info.status_polish != 1
-            #    @info "Solved but not polished. Level=$level"
-            #    @infiltrate level==4
-            #    continue
-            #end
             if !isapprox(z, res.x; atol=1e-4)
                 z .= res.x
                 J = comp_indices(gavi,z,w)
@@ -513,7 +508,6 @@ J[4] = {i :      zᵢ = uᵢ, rᵢ = 0 }
 J[5] = {i :      zᵢ = uᵢ, rᵢ < 0 }
 J[6] = {i : lᵢ = zᵢ = uᵢ, rᵢ free}
 """
-#function comp_indices(avi::AVI, r, z, w, permuted_request=Set{Linear}(); tol=1e-4)
 function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}(); tol=1e-2)
     equal_bounds = isapprox.(l, u; atol=tol)
     riszero = isapprox.(r, 0; atol=tol)
@@ -564,14 +558,6 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
         end
         J[i] = Set(Ji)
     end
-
-    #J[1] = findall( isapprox.(z, avi.l; atol=tol) .&& r .> tol .&& .!equal_bounds)
-    #J[2] = findall( isapprox.(z, avi.l; atol=tol) .&& riszero .&& .!equal_bounds)
-    #J[3] = findall( (avi.l.+tol .< z .< avi.u.-tol) .&& riszero .&& .!equal_bounds)
-    #J[4] = findall( isapprox.(z, avi.u; atol=tol) .&& riszero .&& .!equal_bounds)
-    #J[5] = findall( isapprox.(z, avi.u; atol=tol) .&& r .< -tol .&& .!equal_bounds)
-    #J[6] = findall( equal_bounds)
-    #sum(length.(values(J))) < length(z) && throw(error("Z does not cleanly solve AVI"))
     return J
 end
 function comp_indices(avi::AVI, z, w; tol=1e-2)

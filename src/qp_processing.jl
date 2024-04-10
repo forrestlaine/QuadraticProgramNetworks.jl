@@ -80,14 +80,8 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
                 return (; solution=false, λ=nothing, e="Current point is suboptimal", debug_data=nothing)
             end
         else
-            pos_inds = ax .< l .+ 1e-3
-            neg_inds = ax .> u .- 1e-3
-
-            pos_inds2 = ax .< l .+ 1e-1
-            neg_inds2 = ax .> u .- 1e-1
-
-            @infiltrate pos_inds ≠ pos_inds2
-            @infiltrate neg_inds ≠ neg_inds2
+            pos_inds = ax .< l .+ 1e-2
+            neg_inds = ax .> u .- 1e-2
 
             both_inds = pos_inds .&& neg_inds
             pos_inds = pos_inds .&& .!both_inds
@@ -126,13 +120,13 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
                 Ad = A[:,dec_inds]
                 try
                     λ = solve_qp(Ad*Ad', -Ad*q̃, sparse(I, m, m), lb, ub; solver=:PATH)
-                    if isapprox(Ad'*λ, q̃; atol=1e-4, rtol=1e-4)
+                    if isapprox(Ad'*λ, q̃; atol=1e-4)
                         return (; solution=true, λ, debug_data=nothing)
                     else
-                        return (; solution=false, λ, e="Current point is suboptimal (via QP).", debug_data=(; Ad, q̃, λ))
+                        return (; solution=false, λ, e="Current point is suboptimal (via QP).", debug_data=(; Ad, q̃, λ, pos_inds, neg_inds, both_inds, ax, l, u))
                     end
                 catch ee
-                    return (; solution=false, λ=nothing, e="Solving for duals failed. $ee", debug_data=nothing)
+                    return (; solution=false, λ=nothing, e="Solving for duals failed. $ee", debug_data=(; ee))
                 end
             end
         end

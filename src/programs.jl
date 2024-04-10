@@ -72,6 +72,7 @@ Base.@kwdef mutable struct QPNetOptions
     gen_solution_map::Bool=false
     levels_to_remove_subsets::AbstractSet{Int}=NaturalNumbers()
     check_convexity::Bool=false
+    check_for_cycling::Bool=true
 end
 
 mutable struct QPNet
