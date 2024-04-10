@@ -21,7 +21,7 @@ function solve_qp(Q, q, A, l, u; tol=1e-8, debug=false, solver=:OSQP)
         uu = [fill(+Inf, n+m); u]
         (path_status, z, info) =  PATHSolver.solve_mcp(M, qq, ll, uu, zeros(2m+n), 
                                                    silent=true, 
-                                                   convergence_tolerance=1e-8, 
+                                                   convergence_tolerance=1e-10,
                                                    cumulative_iteration_limit=100000,
                                                    restart_limits=5,
                                                    lemke_rank_deficiency_iterations=1000)
@@ -38,7 +38,7 @@ end
 
 function check_qp_convexity(Q, A, l, u, dec_inds, id; tol=1e-6, debug=false)
     p = Poly(A, l, u)
-    (; implicitly_equality, vals) = implicit_bounds(p; tol, debug)
+    (; implicitly_equality, vals) = implicit_bounds(p; tol, debug=false)
     Ae = collect(A[implicitly_equality,dec_inds])
     F = svd(Ae; full=true)
     V = F.V
@@ -47,6 +47,7 @@ function check_qp_convexity(Q, A, l, u, dec_inds, id; tol=1e-6, debug=false)
     QQ = collect(Z'*Q[dec_inds, dec_inds]*Z)
     E = eigen(QQ)
     convex = all(E.values .> -tol) 
+    @infiltrate debug
     if !convex
         error("QP $id is not convex. Exiting.")
     end
@@ -64,7 +65,7 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
     end |> (x -> vcat.(x...))
     m = size(A,1)
 
-    check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds, id)
+    check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds, id; debug=true)
     
     ax = A*x 
 
@@ -120,6 +121,10 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
                 Ad = A[:,dec_inds]
                 try
                     λ = solve_qp(Ad*Ad', -Ad*q̃, sparse(I, m, m), lb, ub; solver=:PATH)
+                    param_inds = setdiff(1:length(x), dec_inds)
+                    
+                    @infiltrate id == 2
+                    solve_qp(qp.f.Q[dec_inds, dec_inds], qp.f.Q[dec_inds,param_inds]*x[param_inds]+qp.f.q[dec_inds], A[:,dec_inds], l-A[:,param_inds]*x[param_inds], u-A[:,param_inds]*x[param_inds])
                     if isapprox(Ad'*λ, q̃; atol=1e-4)
                         return (; solution=true, λ, debug_data=nothing)
                     else

@@ -64,7 +64,7 @@ Base.@kwdef mutable struct QPNetOptions
     tol::Float64=1e-4
     high_dimension::Bool=false
     high_dimension_max_iters::Int=10
-    num_projections::Int=0
+    num_projections::Int=4
     make_requests::Bool=false
     exploration_vertices::Int=0
     try_hull::Bool=false
@@ -85,6 +85,7 @@ mutable struct QPNet
     variables::Vector{Num}
     var_indices::Dict{Num, Int}
     problem_data::Dict # holds problem data for auxiliary functions
+    iterate_cache::Dict # holds information about iterates for cycling detection
     visualization_function::Function
     default_initialization::Vector{Float64}
 end
@@ -107,9 +108,10 @@ function QPNet(sym_vars::Vararg{Union{Num,Array{Num}}})
     network_depth_map =  Dict{Int, Set{Int}}()
     options = QPNetOptions()
     problem_data = Dict{Any, Any}()
+    iterate_cache = Dict{Int, Vector{Vector{Float64}}}()
     visualization_function = (x -> nothing)
     default_initialization = zeros(ind)
-    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds, problem_data, visualization_function, default_initialization)
+    QPNet(qps, constraints, network_edges, reachable_nodes, network_depth_map, options, all_vars, var_inds, problem_data, iterate_cache, visualization_function, default_initialization)
 end
 
 function flatten(qpn::QPNet)
