@@ -1,7 +1,7 @@
 function solve_qp(Q, q, A, l, u; tol=1e-8, debug=false, solver=:OSQP)
     if solver == :OSQP
         m = OSQP.Model()
-        OSQP.setup!(m; P=sparse(Q), q, A=sparse(A), l, u, verbose=false, polish=true, eps_abs=tol, eps_rel=tol, max_iter=20000)
+        OSQP.setup!(m; P=sparse(Q), q, A=sparse(A), l, u, verbose=false, polish=true, eps_abs=tol, eps_rel=tol, max_iter=100000)
         ret = OSQP.solve!(m)
         @infiltrate debug
         if ret.info.status_val ∉ (1,2)
@@ -45,10 +45,11 @@ function check_qp_convexity(Q, A, l, u, dec_inds, id; tol=1e-6, debug=false)
     r = rank(Diagonal(F.S))
     Z = V[:,r+1:end]
     QQ = collect(Z'*Q[dec_inds, dec_inds]*Z)
-    E = eigen(QQ)
+    E = eigen(QQ+QQ')
     convex = all(E.values .> -tol) 
     @infiltrate debug
     if !convex
+        @infiltrate
         error("QP $id is not convex. Exiting.")
     end
 end
@@ -65,7 +66,7 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
     end |> (x -> vcat.(x...))
     m = size(A,1)
 
-    check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds, id; debug=true)
+    check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds, id; debug=false)
     
     ax = A*x 
 
@@ -121,10 +122,6 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
                 Ad = A[:,dec_inds]
                 try
                     λ = solve_qp(Ad*Ad', -Ad*q̃, sparse(I, m, m), lb, ub; solver=:PATH)
-                    param_inds = setdiff(1:length(x), dec_inds)
-                    
-                    @infiltrate id == 2
-                    solve_qp(qp.f.Q[dec_inds, dec_inds], qp.f.Q[dec_inds,param_inds]*x[param_inds]+qp.f.q[dec_inds], A[:,dec_inds], l-A[:,param_inds]*x[param_inds], u-A[:,param_inds]*x[param_inds])
                     if isapprox(Ad'*λ, q̃; atol=1e-4)
                         return (; solution=true, λ, debug_data=nothing)
                     else

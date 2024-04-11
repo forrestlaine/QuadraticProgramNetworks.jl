@@ -109,7 +109,9 @@ function setup(::Val{:repeated_toll_setting}; N=2, L = 3, D=0.0, α=0.2, kwargs.
         lane_change = U[:,n]'*U[:,n]
         cost = P[:,n]'*lane_costs + α*lane_change
         push!(running_costs, cost)
-        p_players[n] = QPN.add_qp!(qp_net, sum(running_costs), [con_id,], P[:,n])
+        tot_cost = n ≤ N ? cost : sum(running_costs[end-1:end])
+        tot_cost = sum(running_costs)
+        p_players[n] = QPN.add_qp!(qp_net, tot_cost, [con_id,], P[:,n], U[:,n])
         #p_players[n] = QPN.add_qp!(qp_net, cost, [con_id,], P[:,n], U[:,n])
 
         revenue = -T[:,n]'*P[1:L-1,n]

@@ -412,8 +412,7 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     @infiltrate debug
 
     if status != SUCCESS
-        @infiltrate
-        error("AVI solve error. $(info)")
+        error("AVI solve error. A likely cause of this is that one of the qps $player_pool is unbounded. $(info)")
     end
 
     num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)
