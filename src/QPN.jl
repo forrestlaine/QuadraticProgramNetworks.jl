@@ -42,6 +42,7 @@ include("../examples/repeated_toll_setting.jl")
 include("../examples/four_player_matrix_game.jl")
 include("../examples/rock_paper_scissors.jl")
 include("../examples/chainstore.jl")
+include("../examples/shepherd_sheep.jl")
 
 export Poly, QP, Constraint, Quadratic, QPNet, solve, setup
 

@@ -67,6 +67,20 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
     m = size(A,1)
 
     check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds, id; debug=false)
+
+    if debug
+        @infiltrate
+        param_inds = setdiff(1:length(x), dec_inds)
+        w = x[param_inds]
+        R = qp.f.Q[dec_inds, param_inds]
+        QQ = qp.f.Q[dec_inds, dec_inds]
+        qq = qp.f.q[dec_inds] + R*w
+        AA = A[:, dec_inds]
+        bb = A[:, param_inds]*w
+        ll = l - bb
+        uu = u - bb
+        solve_qp(QQ, qq, AA, ll, uu; solver=:OSQP, debug=true)
+    end
     
     ax = A*x 
 
@@ -265,7 +279,7 @@ function combine(regions, solutions, x; show_progress=true)
         end
         widths = [length(c) for c in combined]
 
-        if length(widths) > 3 && sum(widths) > 20
+        if length(widths) > 3 && sum(widths) > 20 && false
             @error("Too many solutions to combine. $widths")
             error("Too many solutions to combine.")
         end

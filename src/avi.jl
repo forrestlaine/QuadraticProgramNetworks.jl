@@ -412,7 +412,19 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     @infiltrate debug
 
     if status != SUCCESS
-        error("AVI solve error. A likely cause of this is that one of the qps $player_pool is unbounded. $(info)")
+        try
+            for id in player_pool
+                qp = qp_net.qps[id]
+                cons = Poly[qp_net.constraints[i].poly for i in qp.constraint_indices]
+                for j in qp_net.network_edges[id]
+                    push!(cons, S[j])
+                end
+                verify_solution(qp, id, cons, decision_inds(qp_net, id), x, true; debug=true)
+            end
+        catch eee
+            @infiltrate
+        end
+        error("AVI solve error. This might be because one of the qps $player_pool is unbounded or ill-conditioned. $(info)")
     end
 
     num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)

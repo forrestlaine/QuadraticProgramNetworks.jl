@@ -79,23 +79,28 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
             if !equilibrium
                 @debug "Equilibium not satisfied at level $level, attempting to find one using the following subpiece assignment:"
                 @debug "$(subpiece_ids)"
-                #try
+                try
                     xnew = solve_qep(qpn, players_at_level, x, subpiece_assignments)
                     if norm(xnew-x) < 1e-4
-                        error("Detected disagreement in solution status between qp solution processer and equilibrium solver.\nTry setting qpn.options.check_convexity = true.")
+                        error("Detected disagreement in solution status between qp solution processer and equilibrium solver.\nCheck the convexity and conditioning of your QPs.")
                         solve_qep(qpn, players_at_level, x, subpiece_assignments; debug=true)
                         #@infiltrate
                     end
                     x = xnew
                     @debug "Equilibrium found, updating solution estimate."
                     qpn.options.debug_visualize && qpn.visualization_function(x)
-                #catch e
-                #    @infiltrate
-                #    @debug "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."
-                #    return (; solved=false, x_fail=x, x_opt=nothing)
-                #end
+                catch e
+                    @infiltrate
+                    @debug "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."
+                    return (; solved=false, x_fail=x, x_opt=nothing)
+                end
                 continue
             else
+                if level == 1
+                    for (k,v) in qpn.iterate_cache
+                        empty!(qpn.iterate_cache[k])
+                    end
+                end
                 return (; solved=true, x_opt=x, Sol=S, identified_request=Set{Linear}(), x_alts=Vector{Float64}[])
             end
         end
