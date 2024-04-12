@@ -5,6 +5,7 @@ end
 function setup(::Val{:shepherd_sheep}; 
                T=5,
                dt = 1.0,
+               α = 0.0,
                shepherd_start=[-4.0, -5, 0, 0],
                sheep_start=[5.0, -4, 0, 0],
                u_max = 1.0,
@@ -33,30 +34,30 @@ function setup(::Val{:shepherd_sheep};
 
         Xprev = t > 1 ? X_shepherd[:, t-1] : shepherd_start
         dyn_cons = x1 - simple_pointmass_dyn(Xprev, u1, dt)
-        #cons = [u1; dyn_cons]
-        #l = [fill(-u_max, 2); zeros(4)]
-        #u = [fill(+u_max, 2); zeros(4)]
-        cons = dyn_cons
-        l = zeros(4)
-        u = zeros(4)
+        cons = [u1; dyn_cons]
+        l = [fill(-u_max, 2); zeros(4)]
+        u = [fill(+u_max, 2); zeros(4)]
+        #cons = dyn_cons
+        #l = zeros(4)
+        #u = zeros(4)
         con_id = QPN.add_constraint!(qp_net, cons, l, u)
         push!(shepherd_cons, con_id)
         
-        cost = x2'*x2 + 0.1*u1'*u1
+        cost = x2'*x2 + α*u1'*u1
         push!(running_shepherd_costs, cost)
         shepherd_players[t] = QPN.add_qp!(qp_net, sum(running_shepherd_costs), [con_id,], x1, u1)
         
         Xprev = t > 1 ? X_sheep[:, t-1] : sheep_start
         dyn_cons = x2 - simple_pointmass_dyn(Xprev, u2, dt)
-        #cons = [u2; dyn_cons]
-        #l = [fill(-u_max, 2); zeros(4)]
-        #u = [fill(+u_max, 2); zeros(4)]
-        cons = dyn_cons
-        l = zeros(4)
-        u = zeros(4)
+        cons = [u2; dyn_cons]
+        l = [fill(-u_max, 2); zeros(4)]
+        u = [fill(+u_max, 2); zeros(4)]
+        #cons = dyn_cons
+        #l = zeros(4)
+        #u = zeros(4)
         con_id = QPN.add_constraint!(qp_net, cons, l, u)
         
-        cost = (x2-x1)'*(x2-x1) + 0.1*u2'*u2
+        cost = (x2-x1)'*(x2-x1) + α*u2'*u2
         push!(running_sheep_costs, cost)
         sheep_players[t] = QPN.add_qp!(qp_net, sum(running_sheep_costs), [con_id,], x2, u2)
 
@@ -74,7 +75,7 @@ function setup(::Val{:shepherd_sheep};
     
     QPN.add_edges!(qp_net, edge_list)
     QPN.assign_constraint_groups!(qp_net)
-    QPN.set_options!(qp_net; exploration_vertices=10, check_convexity=true, debug_visualize=true, kwargs...)
+    QPN.set_options!(qp_net; exploration_vertices=10, check_convexity=true, debug_visualize=false, kwargs...)
     qp_net.default_initialization = [repeat(shepherd_start, T); repeat(sheep_start, T); zeros(2*T*2)]
     qp_net.visualization_function=(x->visualize_shepherd_sheep(shepherd_start, sheep_start, T, x))
 

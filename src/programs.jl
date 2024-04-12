@@ -73,6 +73,7 @@ Base.@kwdef mutable struct QPNetOptions
     levels_to_remove_subsets::AbstractSet{Int}=NaturalNumbers()
     check_convexity::Bool=false
     check_for_cycling::Bool=true
+    perturb_to_continue::Bool=true
 end
 
 mutable struct QPNet

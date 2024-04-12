@@ -69,7 +69,6 @@ function verify_solution(qp, id, constraints, dec_inds, x, check_convexity; tol=
     check_convexity && check_qp_convexity(qp.f.Q, A, l, u, dec_inds, id; debug=false)
 
     if debug
-        @infiltrate
         param_inds = setdiff(1:length(x), dec_inds)
         w = x[param_inds]
         R = qp.f.Q[dec_inds, param_inds]
@@ -279,7 +278,8 @@ function combine(regions, solutions, x; show_progress=true)
         end
         widths = [length(c) for c in combined]
 
-        if length(widths) > 3 && sum(widths) > 20 && false
+        if length(widths) > 3 && sum(widths) > 20
+            @infiltrate
             @error("Too many solutions to combine. $widths")
             error("Too many solutions to combine.")
         end

@@ -43,18 +43,30 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
 
             players_at_level = qpn.network_depth_map[level] |> collect |> sort
             players_at_child_level = union((qpn.network_edges[i] for i in players_at_level)...) |> collect |> sort
+            local processing_tasks
             processing_tasks = map(players_at_level) do id
                 process_qp(qpn, id, x, S; exploration_vertices=qpn.options.exploration_vertices)
             end
+            
+
             results = fetch.(processing_tasks)
             equilibrium = true
             subpiece_assignments = Dict(i=>S[i][1] for i in players_at_child_level)
             subpiece_ids = Dict(i=>1 for i in players_at_child_level)
-            for (i,id) in enumerate(players_at_level)
-                r = results[i]
-                if r.failed
+
+            if any(r.failed for r in results)
+                if qpn.options.perturb_to_continue && false
+                    inds = union((decision_inds(qpn, id) for id in players_at_level)...)
+                    other_inds = setdiff(1:length(x), inds)
+                    x[other_inds] += 0.1*randn(rng,length(other_inds))
+                    continue
+                else
                     return (; solved=false, x_fail=x, x_opt=nothing)
                 end
+            end
+
+            for (i,id) in enumerate(players_at_level)
+                r = results[i]
                 if !r.solution
                     equilibrium = false
                     if level < num_levels(qpn)
