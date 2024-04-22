@@ -61,7 +61,6 @@ Find z, u, v, s.t.:
 Currently uses PATHSolver
 """
 function solve_avi(avi::AVI, z0, w; convergence_tolerance=1e-10)
-    PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
     (path_status, z, info) =  PATHSolver.solve_mcp(avi.M, avi.N*w+avi.o,avi.l, avi.u, z0, 
                                                    silent=true, 
                                                    convergence_tolerance=convergence_tolerance,

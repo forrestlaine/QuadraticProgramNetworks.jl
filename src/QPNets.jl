@@ -2,8 +2,6 @@ module QPNets
 
 using CDDLib
 using Combinatorics
-using DataStructures
-using IterTools
 using LinearAlgebra
 using OSQP
 using PATHSolver
@@ -15,7 +13,6 @@ using Random
 using SparseArrays
 using Symbolics
 using CairoMakie
-
 using Infiltrator
 
 include("macros.jl")
