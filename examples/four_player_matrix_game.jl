@@ -10,10 +10,10 @@ function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_const
 
     rng = MersenneTwister(seed)
     
-    x1 = Symbolics.variables(:x1, 1:2)
-    x2 = Symbolics.variables(:x2, 1:2)
-    x3 = Symbolics.variables(:x3, 1:2)
-    x4 = Symbolics.variables(:x4, 1:2)
+    x1 = QPNets.variables(:x1, 1:2)
+    x2 = QPNets.variables(:x2, 1:2)
+    x3 = QPNets.variables(:x3, 1:2)
+    x4 = QPNets.variables(:x4, 1:2)
     x = Dict(1=>x1, 2=>x2, 3=>x3, 4=>x4)
     
     qp_net = QPNet(x1,x2,x3,x4)
@@ -123,7 +123,7 @@ function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_const
         cons = x[i]
         lb = 5*[-1.0, -1.0]
         ub = 5*[1.0, 1.0]
-        con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
+        con_id = QPNets.add_constraint!(qp_net, cons, lb, ub)
 
         ent = [0.5, 0.5]
         #cost = 0
@@ -164,12 +164,13 @@ function setup(::Val{:four_player_matrix_game}; edge_list=[], seed=2, show_const
 
         dvars = x[i]
 
-        QPN.add_qp!(qp_net, cost, [con_id], dvars)
+        QPNets.add_qp!(qp_net, cost, [con_id], dvars)
     end
 
-    QPN.add_edges!(qp_net, edge_list)
-    QPN.assign_constraint_groups!(qp_net)
-    QPN.set_options!(qp_net; kwargs...)
+    QPNets.add_edges!(qp_net, edge_list)
+    QPNets.assign_constraint_groups!(qp_net)
+    QPNets.set_options!(qp_net; kwargs...)
+    qp_net.default_initialization = zeros(8)
     
     qp_net
 end

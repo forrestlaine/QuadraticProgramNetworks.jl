@@ -14,19 +14,20 @@ function setup(::Val{:simple_bilevel}; kwargs...)
     lb = [0.0,]
     ub = [Inf,]
     cons = [y,]
-    con_id = QPN.add_constraint!(qp_net, cons, lb, ub)
+    con_id = QPNets.add_constraint!(qp_net, cons, lb, ub)
            
     cost = (y-x)^2
-    qp_id1 = QPN.add_qp!(qp_net, cost, [con_id,], y)
+    qp_id1 = QPNets.add_qp!(qp_net, cost, [con_id,], y)
 
     cost = ([x;y] - w)'*([x; y] - w)
-    qp_id2 = QPN.add_qp!(qp_net, cost, [], x)
+    qp_id2 = QPNets.add_qp!(qp_net, cost, [], x)
    
     edge_list = [(qp_id2, qp_id1)]
 
-    QPN.add_edges!(qp_net, edge_list)
-    QPN.assign_constraint_groups!(qp_net)
-    QPN.set_options!(qp_net; debug_visualize=true, kwargs...)
+    QPNets.add_edges!(qp_net, edge_list)
+    QPNets.assign_constraint_groups!(qp_net)
+    QPNets.set_options!(qp_net; debug_visualize=false, kwargs...)
+    qp_net.default_initialization .= zeros(4)
     
     qp_net.visualization_function=visualize_simple_bilevel
 
