@@ -1,5 +1,5 @@
 @testset "simple bilevel" begin
-    qpn = setup(:simple_bilevel; gen_solution_map=true, make_requests=true)
+    qpn = setup(:simple_bilevel; gen_solution_map=true)
 
     w1 = [-2.0, -3.0]; x1 = [[-2.0, 0],]
     w2 = [0, -1.0];    x2 = [[0.0, 0],]
@@ -17,6 +17,6 @@
     for (w, x, s) ∈ zip(W,X,S)
         ret = solve(qpn, [w; x0])
         @test any(isapprox(ret.x_opt, [w; xi]; atol=1e-4) for xi in x)
-        @test ret.Sol |> collect |> length ≥ s
+        @test ret.Sol[2] |> collect |> length ≥ s
     end
 end
