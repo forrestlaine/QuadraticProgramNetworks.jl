@@ -1,4 +1,4 @@
-module QPN
+module QPNets
 
 using CDDLib
 using Combinatorics

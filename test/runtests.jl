@@ -1,5 +1,5 @@
 using Test
-using QPN
+using QPNets
 
 # Example tests
 include("repeated_variable_control.jl")
