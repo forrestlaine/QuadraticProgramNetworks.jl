@@ -1,7 +1,7 @@
 name = "QPNets"
 uuid = "576966be-9dca-4525-ada1-64298180af2c"
 authors = ["Forrest Laine <forrest.laine@vanderbilt.edu>"]
-version = "0.2.0"
+version = "0.3.0"
 
 [deps]
 CDDLib = "3391f64e-dcde-5f30-b752-e11513730f60"
