@@ -31,6 +31,9 @@ pkg> instantiate
 julia> using QPNets
 ```
 
+# PATHSolver License
+QPNets relies on the PATHSolver for some of the necessary computations. Make sure to add a valid PATH_LICENSE_STRING to your shell environment variables. [More details can be found at this link.](https://github.com/chkwon/PATHSolver.jl)
+
 # Running examples
 
 Examples from the above-linked paper can be run using the following interface. 
