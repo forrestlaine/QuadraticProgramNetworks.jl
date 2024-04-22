@@ -1,6 +1,7 @@
 # QPNets.jl
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://opensource.org/licenses/MIT)
+[![DOI](https://zenodo.org/badge/572722223.svg)](https://zenodo.org/doi/10.5281/zenodo.11043760)
 
 A package for modeling Quadratic Program Networks (QPNets), and computing corresponding equilibrium points. Examples can be found in the examples subdirectory. This package is under active development. Medium and Large-scale problems may be difficult or impossible to solve using the algorithms implemented in this package at this time. Bug reports are welcomed and appreciated!
 
