@@ -29,20 +29,9 @@ include("avi.jl")
 include("avi_solutions.jl")
 include("printing.jl")
 
-include("../examples/bilevel_escape.jl")
-include("../examples/trilevel_escape.jl")
-include("../examples/repeated_variable_control.jl")
 include("../examples/simple_bilevel.jl")
-include("../examples/simple_network.jl")
-include("../examples/robust_constrained.jl")
-include("../examples/control_avoid.jl")
-include("../examples/robust_avoid.jl")
 include("../examples/robust_avoid_simple.jl")
-include("../examples/repeated_toll_setting.jl")
 include("../examples/four_player_matrix_game.jl")
-include("../examples/rock_paper_scissors.jl")
-include("../examples/chainstore.jl")
-include("../examples/shepherd_sheep.jl")
 
 export Poly, QP, Constraint, Quadratic, QPNet, solve, setup
 

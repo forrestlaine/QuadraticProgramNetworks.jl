@@ -1,7 +1,3 @@
-using StaticArrays
-using Infiltrator
-using QPN
-
 struct PolyObject{D, T}
     # Assumed clockwise ordering
     verts::Vector{SVector{D, T}}
