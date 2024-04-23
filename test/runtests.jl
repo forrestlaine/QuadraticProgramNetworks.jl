@@ -1,5 +1,5 @@
 using Test
-using QPNets
+using QuadraticProgramNetworks
 
 # Example tests
 include("simple_bilevel.jl")

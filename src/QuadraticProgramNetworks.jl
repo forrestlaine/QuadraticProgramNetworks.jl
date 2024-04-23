@@ -1,4 +1,4 @@
-module QPNets
+module QuadraticProgramNetworks
 
 using CDDLib
 using Combinatorics

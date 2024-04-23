@@ -1,4 +1,4 @@
-# QPNets.jl
+# QuadraticProgramNetworks.jl
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://opensource.org/licenses/MIT)
 [![DOI](https://zenodo.org/badge/572722223.svg)](https://zenodo.org/doi/10.5281/zenodo.11043760)
@@ -29,7 +29,7 @@ julia --project
 # hit `]` to enter "pkg"-mode of the REPL
 pkg> instantiate
 # hit `delete` or `backspace` to exit "pkg"-mode of the REPL
-julia> using QPNets
+julia> using QuadraticProgramNetworks
 ```
 
 # PATHSolver License

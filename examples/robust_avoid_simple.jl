@@ -27,13 +27,13 @@ function setup(::Val{:robust_avoid_simple};
     end
     bos = [0.2 .+ 0.8*rand(rng)*ones(num_poly_faces) for _ in 1:num_obj]
 
-    ue = QPNets.variables(:ue, 1:2)  
-    uo = QPNets.variables(:uo, 1:2, 1:num_obj)
-    xe = QPNets.variables(:xe, 1:2)  
-    xo = QPNets.variables(:xo, 1:2, 1:num_obj)
+    ue = variables(:ue, 1:2)  
+    uo = variables(:uo, 1:2, 1:num_obj)
+    xe = variables(:xe, 1:2)  
+    xo = variables(:xo, 1:2, 1:num_obj)
 
-    s = QPNets.variables(:s, 1:2, 1:num_obj)
-    ϵ = QPNets.variables(:ϵ, 1:num_obj)
+    s = variables(:s, 1:2, 1:num_obj)
+    ϵ = variables(:ϵ, 1:num_obj)
  
     qp_net = QPNet(xe,xo, ue, uo, s, ϵ)
     qp_net.problem_data[:Ae] = Ae
@@ -49,9 +49,9 @@ function setup(::Val{:robust_avoid_simple};
                 Aos[i]*(s[:,i]-(xo[:,i]+uo[:,i])) + bos[i] + ones(num_poly_faces)*ϵ[i]]
         lb = fill(0.0, length(cons))
         ub = fill(Inf, length(cons))
-        con_id = QPNets.add_constraint!(qp_net, cons, lb, ub)
+        con_id = add_constraint!(qp_net, cons, lb, ub)
         vars = [s[:,i]; ϵ[i]]
-        s_players[i] = QPNets.add_qp!(qp_net, cost, [con_id,], vars...)
+        s_players[i] = add_qp!(qp_net, cost, [con_id,], vars...)
     end
  
     a_players = Dict()
@@ -60,26 +60,26 @@ function setup(::Val{:robust_avoid_simple};
         cons = uo[:,i]
         lb = fill(-max_obj_delta, 2)
         ub = fill(+max_obj_delta, 2)
-        ad_con_id = QPNets.add_constraint!(qp_net, cons, lb, ub)
+        ad_con_id = add_constraint!(qp_net, cons, lb, ub)
         cost = ϵ[i]
-        a_players[i] = QPNets.add_qp!(qp_net, cost, [ad_con_id], uo[:,i])
+        a_players[i] = add_qp!(qp_net, cost, [ad_con_id], uo[:,i])
     end
 
     cons = [ue; ϵ]
     lb = [fill(-max_ego_delta, 2); zeros(num_obj)]
     ub = [fill(+max_ego_delta, 2); fill(Inf, num_obj)]
-    ego_con_id = QPNets.add_constraint!(qp_net, cons, lb, ub)
+    ego_con_id = add_constraint!(qp_net, cons, lb, ub)
     xef = xe+ue
     cost = 0.5 * xef'*Q*xef + xef'*q + 0.5*ue'*R*ue
-    ego_player = QPNets.add_qp!(qp_net, cost, [ego_con_id], ue)
+    ego_player = add_qp!(qp_net, cost, [ego_con_id], ue)
 
     #################
     # Add edges
     edge_list = [[(ego_player, a_players[i]) for i in 1:num_obj]; [(a_players[i], s_players[i]) for i in 1:num_obj]]
 
-    QPNets.add_edges!(qp_net, edge_list)
-    QPNets.assign_constraint_groups!(qp_net)
-    QPNets.set_options!(qp_net; exploration_vertices=exploration_vertices, num_projections=num_projections, debug_visualize=false, kwargs...)
+    add_edges!(qp_net, edge_list)
+    assign_constraint_groups!(qp_net)
+    set_options!(qp_net; exploration_vertices=exploration_vertices, num_projections=num_projections, debug_visualize=false, kwargs...)
 
     x0e = [-5.0, 0]
     x0os = map(1:num_obj) do i
