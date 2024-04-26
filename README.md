@@ -39,7 +39,9 @@ QPNets relies on the PATHSolver for some of the necessary computations. Make sur
 
 Examples from the above-linked paper can be run using the following interface. 
 
+
 ```julia
+# remember to set PATHSolver license as instructed above
 julia> qpn = setup(:robust_avoid_simple);
 julia> ret = solve(qpn);
 ```
