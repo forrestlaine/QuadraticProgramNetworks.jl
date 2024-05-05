@@ -5,7 +5,7 @@ authors:
   given-names: "Forrest"
   orcid: "https://orcid.org/0000-0003-3982-3920"
 title: "QuadraticProgramNetworks.jl"
-version: 0.3.0
-doi: 10.5281/zenodo.11043760
+version: 0.4.0
+doi: 10.5281/zenodo.11075038
 date-released: 2024-04-22
 url: "https://github.com/forrestlaine/QuadraticProgramNetworks.jl"
