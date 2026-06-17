@@ -408,8 +408,6 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     # require reducing dimension AFTER psi minimization
     (; z, status, info) = solve_gavi(gavi, z0, w)
 
-    @infiltrate debug
-
     if status != SUCCESS
         try
             for id in player_pool
@@ -421,7 +419,7 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
                 verify_solution(qp, id, cons, decision_inds(qp_net, id), x, true; debug=true)
             end
         catch eee
-            @infiltrate
+            @debug "Debug verification failed after AVI solve error." exception=(eee, catch_backtrace())
         end
         error("AVI solve error. This might be because one of the qps $player_pool is unbounded or ill-conditioned. $(info)")
     end
@@ -429,7 +427,6 @@ function solve_qep(qp_net, player_pool, x, S=Dict{Int, Poly}();
     num_ξ = sum(length(decision_inds(qp_net, id)) for id in player_pool)
     ξ = z[length(dec_inds)+1:length(dec_inds)+num_ξ]
     if norm(ξ) > 1e-3 && false
-        @infiltrate
         error("Detected disagreement in the values of decision variables. 
               It seems that two or more nodes are granted control of the 
               same unrestricted decision variables. The handling of such 
@@ -577,9 +574,8 @@ function revise_avi_solution(f, piece, zr, w, decision_inds, param_inds, rng)
     try 
         (; z, status) = solve_gavi(gavi, z0, w)
     catch e
-        @infiltrate
+        error("AVI solve error: $e")
     end
-    status != SUCCESS && @infiltrate
     status != SUCCESS && error("AVI solve error!")
     (; piece, x_opt, reduced_inds) = get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, param_inds, rng; permute=false)
     (; piece, x_opt, z_revised=z)

@@ -83,7 +83,7 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                 else
                     S[id] = level ∈ qpn.options.levels_to_remove_subsets ? results[i].S |> remove_subsets : results[i].S
                     if !isnothing(S[id]) && length(S[id]) == 0
-                        @infiltrate
+                        error("Generated an empty solution graph for node $id.")
                     end
                     !isnothing(S[id]) && @debug "Solution graph for node $i has $(length(S[id])) pieces."
                 end
@@ -96,13 +96,11 @@ function solve_base!(qpn::QPNet, x_init, request, relaxable_inds;
                     if norm(xnew-x) < 1e-4
                         error("Detected disagreement in solution status between qp solution processer and equilibrium solver.\nCheck the convexity and conditioning of your QPs.")
                         solve_qep(qpn, players_at_level, x, subpiece_assignments; debug=true)
-                        #@infiltrate
                     end
                     x = xnew
                     @debug "Equilibrium found, updating solution estimate."
                     qpn.options.debug_visualize && qpn.visualization_function(x)
                 catch e
-                    @infiltrate
                     @debug "Solving error when computing equilibrium with subpiece ids: $subpiece_ids. Returning x, although this is a known non-equilibrium."
                     return (; solved=false, x_fail=x, x_opt=nothing)
                 end

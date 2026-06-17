@@ -1,3 +1,17 @@
+import QuadraticProgramNetworks:
+    setup,
+    QPNet,
+    variables,
+    add_constraint!,
+    add_qp!,
+    add_edges!,
+    assign_constraint_groups!,
+    set_options!
+using LinearAlgebra
+using Random
+
+load_cairomakie() = Base.require(Base.PkgId(Base.UUID("13f3f980-e62b-5c42-98c6-ff1f3baf88f0"), "CairoMakie"))
+
 function setup(::Val{:robust_avoid_simple};
                  num_obj=2,
                  num_poly_faces=5,
@@ -117,8 +131,9 @@ function get_verts(A,b,x)
 end
 
 function viz_solution_robust_avoid_simple(Ae,be,Ao,bo,θ)
-    f = Figure()
-    ax = Axis(f[1,1], aspect = DataAspect(), limits = (-7, 15, -4, 18))
+    Makie = load_cairomakie()
+    f = Makie.Figure()
+    ax = Makie.Axis(f[1,1], aspect = Makie.DataAspect(), limits = (-7, 15, -4, 18))
     #ax = Axis(f[1,1], aspect = DataAspect())
     num_obj = length(Ao)
 
@@ -131,11 +146,11 @@ function viz_solution_robust_avoid_simple(Ae,be,Ao,bo,θ)
     Ve = get_verts(Ae,be,Xe)
     xe = [[v[1] for v in Ve]; Ve[1][1]]
     ye = [[v[2] for v in Ve]; Ve[1][2]]
-    lines!(ax, xe, ye, color=:blue)
+    Makie.lines!(ax, xe, ye, color=:blue)
     Ve = get_verts(Ae,be,Xe+Ue)
     xe = [[v[1] for v in Ve]; Ve[1][1]]
     ye = [[v[2] for v in Ve]; Ve[1][2]]
-    lines!(ax, xe, ye, color=:blue, linewidth=3)
+    Makie.lines!(ax, xe, ye, color=:blue, linewidth=3)
 
     colors = [:red, :orange, :purple, :yellow]
     for i in 1:num_obj
@@ -143,21 +158,21 @@ function viz_solution_robust_avoid_simple(Ae,be,Ao,bo,θ)
         xo = [[v[1] for v in Vo]; Vo[1][1]]
         yo = [[v[2] for v in Vo]; Vo[1][2]]
 
-        lines!(ax, xo, yo, color=colors[i])
+        Makie.lines!(ax, xo, yo, color=colors[i])
         Vo = get_verts(Ao[i],bo[i],Xo[i]+Uo[i])
         xo = [[v[1] for v in Vo]; Vo[1][1]]
         yo = [[v[2] for v in Vo]; Vo[1][2]]
-        lines!(ax, xo, yo, color=colors[i], linewidth=3)
+        Makie.lines!(ax, xo, yo, color=colors[i], linewidth=3)
     
         Ve = get_verts(Ae,be .+ ϵ[i],Xe+Ue)
         xe = [[v[1] for v in Ve]; Ve[1][1]]
         ye = [[v[2] for v in Ve]; Ve[1][2]]
-        lines!(ax, xe, ye, color=colors[i], linestyle=:dash, linewidth=2)
+        Makie.lines!(ax, xe, ye, color=colors[i], linestyle=:dash, linewidth=2)
     
         Vo = get_verts(Ao[i],bo[i] .+ ϵ[i], Xo[i]+Uo[i])
         xo = [[v[1] for v in Vo]; Vo[1][1]]
         yo = [[v[2] for v in Vo]; Vo[1][2]]
-        lines!(ax, xo, yo, color=colors[i], linestyle=:dash, linewidth=2)
+        Makie.lines!(ax, xo, yo, color=colors[i], linestyle=:dash, linewidth=2)
     end
     name = string(floor(Int, time()*1e3))[end-4:end] * ".png"
     display(f)

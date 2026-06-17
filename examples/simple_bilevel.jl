@@ -1,3 +1,16 @@
+import QuadraticProgramNetworks:
+    setup,
+    QPNet,
+    variable,
+    variables,
+    add_constraint!,
+    add_qp!,
+    add_edges!,
+    assign_constraint_groups!,
+    set_options!
+
+load_cairomakie() = Base.require(Base.PkgId(Base.UUID("13f3f980-e62b-5c42-98c6-ff1f3baf88f0"), "CairoMakie"))
+
 """
 variables := w1 w2 x y
 f1: ½ || [x; y] - [w1; w2] ||²
@@ -5,9 +18,9 @@ f2: ½ (y-x)²
 """
 function setup(::Val{:simple_bilevel}; kwargs...)
     
-    w = Symbolics.variables(:w, 1:2) 
-    x = Symbolics.variable(:x)
-    y = Symbolics.variable(:y)
+    w = variables(:w, 1:2)
+    x = variable(:x)
+    y = variable(:y)
     
     qp_net = QPNet(w,x,y)
   
@@ -36,22 +49,21 @@ end
 
 
 function visualize_simple_bilevel(θ)
-    f = Figure()
-    ax = Axis(f[1,1], aspect = DataAspect(), limits = (-4, 4, -3, 5))
+    Makie = load_cairomakie()
+    f = Makie.Figure()
+    ax = Makie.Axis(f[1,1], aspect = Makie.DataAspect(), limits = (-4, 4, -3, 5))
 
     w = θ[1:2]
     x = θ[3]
     y = θ[4]
 
-    lines!(ax, [-5,0.0], [0.0, 0], color=:black, linewidth=4)
-    lines!(ax, [0.0, 5.0], [0.0, 5.0], color=:black, linewidth=4)
+    Makie.lines!(ax, [-5,0.0], [0.0, 0], color=:black, linewidth=4)
+    Makie.lines!(ax, [0.0, 5.0], [0.0, 5.0], color=:black, linewidth=4)
     
-    scatter!(ax, w[1],w[2], color=:green, markersize=25)
-    scatter!(ax, x,y, color=:blue, markersize=25)
+    Makie.scatter!(ax, w[1],w[2], color=:green, markersize=25)
+    Makie.scatter!(ax, x,y, color=:blue, markersize=25)
     name = string(floor(Int, time()*1e3))[end-4:end] * ".png"
-    save(name, f)
+    Makie.save(name, f)
     display(f)
 end
-
-
 

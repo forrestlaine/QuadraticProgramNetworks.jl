@@ -3,14 +3,12 @@ function solve_qp(Q, q, A, l, u; tol=1e-8, debug=false, solver=:OSQP)
         m = OSQP.Model()
         OSQP.setup!(m; P=sparse(Q), q, A=sparse(A), l, u, verbose=false, polish=true, eps_abs=tol, eps_rel=tol, max_iter=100000)
         ret = OSQP.solve!(m)
-        @infiltrate debug
         if ret.info.status_val ∉ (1,2)
             error("Solver failure. Status value is $(ret.info.status_val) ($(ret.info.status)).")
         else
             ret.x
         end
     elseif solver == :PATH
-        PATHSolver.c_api_License_SetString("2830898829&Courtesy&&&USR&45321&5_1_2021&1000&PATH&GEN&31_12_2025&0_0_0&6000&0_0")
         n = size(Q,1)
         m = size(A,1)
         M = [Q -A' spzeros(m,m);
@@ -25,7 +23,6 @@ function solve_qp(Q, q, A, l, u; tol=1e-8, debug=false, solver=:OSQP)
                                                    cumulative_iteration_limit=100000,
                                                    restart_limits=5,
                                                    lemke_rank_deficiency_iterations=1000)
-        @infiltrate debug
         if path_status != PATHSolver.MCP_Solved
             error("Solver failure. Status value is $(path_status)")
         else
@@ -47,9 +44,7 @@ function check_qp_convexity(Q, A, l, u, dec_inds, id; tol=1e-6, debug=false)
     QQ = collect(Z'*Q[dec_inds, dec_inds]*Z)
     E = eigen(QQ+QQ')
     convex = all(E.values .> -tol) 
-    @infiltrate debug
     if !convex
-        @infiltrate
         error("QP $id is not convex. Exiting.")
     end
 end
@@ -248,7 +243,7 @@ function combine(solgraphs, x; show_progress=true)
         try
             pr = poly_intersect(r...)
         catch e
-            @infiltrate
+            rethrow(e)
         end
         pr = project(pr, 1:embedded_dim(pr))
         push!(regions,pr)
@@ -279,7 +274,6 @@ function combine(regions, solutions, x; show_progress=true)
         widths = [length(c) for c in combined]
 
         if length(widths) > 3 && sum(widths) > 20
-            @infiltrate
             @error("Too many solutions to combine. $widths")
             error("Too many solutions to combine.")
         end
