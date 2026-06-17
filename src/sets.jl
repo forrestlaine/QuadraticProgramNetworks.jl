@@ -517,7 +517,7 @@ function project(p::Poly, keep_dims; tol=1e-6)
         proj_vr = vrep(projected_points, projected_lines, projected_rays)
         projected = vrep_to_poly(proj_vr)
     catch e
-        @infiltrate
+        rethrow(e)
     end
     ProjectedPoly(projected, p)
 end
@@ -581,7 +581,6 @@ function exemplar_old(poly::Poly; tol=1e-4, debug=false)
                 eps_abs=1e-8,
                 eps_rel=1e-8)
     res = OSQP.solve!(m)
-    @infiltrate debug
     t = -res.info.obj_val
     empty = abs(res.info.status_val) == 3 || t < tol
     example = empty ? nothing : res.x[1:end-1]
@@ -617,7 +616,6 @@ function exemplar(poly::Poly; tol=1e-2, debug=false)
                 eps_abs=1e-8,
                 eps_rel=1e-8)
     res = OSQP.solve!(m)
-    @infiltrate debug
     x = res.x[1:end-1]
     ϵ = res.x[end]
 
@@ -703,7 +701,6 @@ function implicit_bounds(poly::Poly; tol=1e-4, debug=false)
             else
                 val_hi = -res.info.obj_val
             end
-            @infiltrate debug
 
             implicitly_equality[i] = isapprox(val_low, val_hi; atol=tol)
             implicitly_equality[i] && (vals[i] = 0.5*(val_hi+val_low))
@@ -724,7 +721,6 @@ function intrinsic_dim(p::Poly; tol=1e-4, debug=false)
     end
     (; A) = vectorize(p)
     Aim = A[implicitly_equality,:]
-    @infiltrate debug
     intrinsic_dim = embedded_dim(p) - rank(Aim)
 end
 
@@ -804,8 +800,6 @@ function eliminate_variables(p::Poly, indices, xz; debug=false)
     ui = u[inequality] - ci
     li = l[inequality] - ci
 
-    @infiltrate debug
-
     return Poly([Ae;Ai], 
                 [be;li], 
                 [be;ui], 
@@ -820,7 +814,6 @@ Return true if x is an element of p. Assumes closed poly.
 function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6, debug=false)
     d = embedded_dim(p)
     n = length(x)
-    @infiltrate debug
     if n == d
         return all( in(x, S; tol) for S in p )
     else
@@ -843,7 +836,9 @@ function Base.in(x::Vector{Float64}, p::Poly; tol=1e-6, debug=false)
                     verbose=false)
         res = OSQP.solve!(m)
         sv = abs(res.info.status_val)
-        @infiltrate (sv ∉ (1,2,3))
+        if sv ∉ (1,2,3)
+            error("OSQP feasibility check failed with status $(res.info.status).")
+        end
         return abs(res.info.status_val) != 3
     end
 end

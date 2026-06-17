@@ -363,8 +363,8 @@ function sub_indices(qpn::QPNet, level)
 end
 
 function subeq_indices(qpn::QPNet, level)
-    L = length(qpn.network)
-    reduce(vcat, (qpn.qps[i].var_indices for l in level:L for i in qpn.network[l]))
+    L = length(qpn.network_depth_map)
+    reduce(vcat, (qpn.qps[i].var_indices for l in level:L for i in qpn.network_depth_map[l]))
 end
 
 function param_indices(qpn::QPNet, level)

@@ -144,8 +144,6 @@ function get_single_solution(gavi, z, w, level, subpiece_index, decision_inds, p
     local piece
     local x
 
-    @infiltrate debug
-
     J = comp_indices(gavi,z,w)
     #K = random_K(J, rng)
     K = max_freedom_K(J)
@@ -365,7 +363,6 @@ function Base.iterate(gavi_sols::LocalGAVISolutions, state)
             end
             return (piece, gavi_sol_state)
         catch err
-            @infiltrate
             return Base.iterate(gavi_sols, gavi_sol_state)
         end
     elseif !isempty(gavi_sols.unexplored_vertices) && length(gavi_sols.explored_vertices) < gavi_sols.max_vertices # No ready-to-process Poly recipes, need to pull from available vertices
@@ -428,7 +425,7 @@ function local_piece(gavi::GAVI, n, m, K, level, subpiece_index; reducible_inds=
         elseif i ∈ K[8]
             [-Inf Inf gavi.l2[i-d1] gavi.u2[i-d1]]
         else
-            @infiltrate
+            error("Invalid complementarity index set for row $i.")
         end
     end
     l = [bounds[:,1]; bounds[:,3]]
@@ -551,7 +548,7 @@ function comp_indices(M, N, A, B, l, u, r, z, w, permuted_request=Set{Linear}();
         end
         if isempty(Ji)
             if !equal_bounds[i]
-                @infiltrate
+                error("Could not classify complementarity state for index $i.")
             end
             @assert equal_bounds[i]
             push!(Ji, 4)

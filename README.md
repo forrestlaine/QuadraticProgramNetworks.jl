@@ -42,14 +42,14 @@ Examples from the above-linked paper can be run using the following interface.
 
 ```julia
 # remember to set PATHSolver license as instructed above
+julia> include("examples/robust_avoid_simple.jl");
 julia> qpn = setup(:robust_avoid_simple);
 julia> ret = solve(qpn);
 ```
 
 # Constructing new problems
 
-New QPNets can be constructed by following the template provided in the ``` examples ``` directory. Every QPNet should define a ```setup``` function, which defines the decision variables, QP nodes, and edges of the network, and returns a QPNet object. A default initialization can be assigned to the QPNet, in which case an equilibrium can be computed by simply calling ```solve``` on the QPNet. If not specified, the default initialization is the zero vector. A custom initialization can be passed to the solver by calling 
-```solve(qpn, init)```.
+New QPNets can be constructed by following the template provided in the ``` examples ``` directory. Every QPNet should define a ```setup``` function, which defines the decision variables, QP nodes, and edges of the network, and returns a QPNet object. Example files are opt-in; include the desired example file before calling its corresponding ```setup``` method. A default initialization can be assigned to the QPNet, in which case an equilibrium can be computed by simply calling ```solve``` on the QPNet. If not specified, the default initialization is the zero vector. A custom initialization can be passed to the solver by calling ```solve(qpn, init)```.
 
 # Documentation
 
